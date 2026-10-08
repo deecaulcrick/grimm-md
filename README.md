@@ -29,7 +29,7 @@ Installed copies of Grimm check `latest.json` on the newest GitHub release at la
 
 One-time setup:
 
-1. Push this repo to `github.com/deecaulcrick/grimm` (public — the update endpoint in `src-tauri/tauri.conf.json` points there).
+1. Push this repo to `github.com/deecaulcrick/grimm-md` (public — the update endpoint in `src-tauri/tauri.conf.json` points there).
 2. Add the update signing key as repository secrets. The key lives outside the repo at `~/.tauri/grimm.key`; it has no password.
    - `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/grimm.key`
    - `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body ""`
