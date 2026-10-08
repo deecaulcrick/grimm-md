@@ -88,8 +88,10 @@ button {
 /* ---------- Layout ---------- */
 
 #app {
+  --sidebar-w: 256px;
+  position: relative;
   display: grid;
-  grid-template-columns: 256px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   transition: grid-template-columns 0.2s ease;
@@ -116,6 +118,61 @@ button {
   border-right-color: transparent;
 }
 
+/* Drag handles sit over the hairline between panels. */
+#sidebar-resizer,
+.pane-divider {
+  cursor: col-resize;
+  z-index: 5;
+}
+
+#sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--sidebar-w) - 4px);
+  width: 8px;
+}
+
+#app.sidebar-collapsed #sidebar-resizer {
+  display: none;
+}
+
+#sidebar-resizer::after,
+.pane-divider::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+#sidebar-resizer:hover::after,
+.pane-divider:hover::after,
+body.resizing #sidebar-resizer:active::after,
+body.resizing .pane-divider:active::after {
+  opacity: 1;
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.resizing #app {
+  transition: none;
+}
+
+/* Embedded frames would otherwise swallow the pointer mid-drag. */
+body.resizing iframe {
+  pointer-events: none;
+}
+
 .sidebar-top {
   height: var(--bar-h);
   flex: none;
@@ -126,7 +183,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  width: 256px;
+  width: var(--sidebar-w);
 }
 
 .nav-item {
@@ -168,7 +225,7 @@ button {
   flex: 1;
   overflow-y: auto;
   padding: 4px 8px 16px;
-  width: 256px;
+  width: var(--sidebar-w);
 }
 
 .sidebar-scroll section {
@@ -271,8 +328,26 @@ button {
   flex-direction: column;
 }
 
-.pane + .pane {
-  border-left: 1px solid var(--border);
+/* In a split, the first pane takes the dragged share and the second the rest. */
+.pane:first-child:not(:last-child) {
+  flex: 0 0 var(--split, 50%);
+}
+
+.pane-divider {
+  position: relative;
+  flex: none;
+  width: 9px;
+  margin: 0 -4px;
+}
+
+.pane-divider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: var(--border);
 }
 
 .pane-bar {
@@ -633,6 +708,152 @@ button {
 .editor .milkdown .ProseMirror img {
   max-width: 100%;
   border-radius: 8px;
+}
+
+/* ---------- Link cards ---------- */
+
+.editor .milkdown .ProseMirror .link-card-source {
+  display: none;
+}
+
+.link-card {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-height: 92px;
+  margin: 0.4em 0 1.1em;
+  border-radius: 12px;
+  background: var(--code-block);
+  box-shadow: inset 0 0 0 1px var(--border);
+  overflow: hidden;
+  cursor: pointer;
+  font-family: var(--sans);
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.12s;
+}
+
+.link-card:hover {
+  background: var(--hover);
+}
+
+.lc-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 14px 16px;
+}
+
+.lc-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.lc-desc {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lc-site {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.lc-site img {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.editor .milkdown .ProseMirror .link-card .lc-image {
+  flex: none;
+  width: 34%;
+  max-width: 220px;
+  object-fit: cover;
+  border-radius: 0;
+}
+
+.lc-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--border);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.link-card:hover .lc-actions {
+  opacity: 1;
+}
+
+.lc-actions button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-2);
+}
+
+.lc-actions button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.lc-actions .lucide {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---------- HTML embeds ---------- */
+
+.html-embed {
+  display: block;
+  width: 100%;
+  height: 120px;
+  border: 0;
+  background: transparent;
+}
+
+.editor .milkdown .milkdown-code-block .preview-panel .preview {
+  text-align: left;
+}
+
+.editor .milkdown .milkdown-code-block .preview-panel .preview-divider,
+.editor .milkdown .milkdown-code-block .preview-panel .preview-label {
+  display: none;
+}
+
+.editor .milkdown .milkdown-code-block .preview-toggle-button {
+  font-family: var(--sans);
+  font-size: 12px;
 }
 
 /* Floating UI (toolbar, slash menu, tooltips) stays in the app's sans font. */

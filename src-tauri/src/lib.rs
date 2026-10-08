@@ -1,4 +1,4 @@
-use std::{fs, path::Path, sync::Mutex};
+use std::{fs, path::Path, sync::Mutex, time::Duration};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
     Emitter, Manager,
@@ -11,6 +11,56 @@ struct PendingFile(Mutex<Option<String>>);
 const MARKDOWN_EXTENSIONS: [&str; 4] = ["md", "markdown", "mdx", "mdown"];
 const MAX_DEPTH: usize = 4;
 const MAX_FILES: usize = 2000;
+const MAX_PAGE_BYTES: usize = 600_000;
+const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh) Folio/0.1 LinkPreview";
+
+#[derive(serde::Serialize)]
+struct Page {
+    /// The address after redirects, used to resolve relative image and icon paths.
+    url: String,
+    html: String,
+}
+
+/// Downloads the start of a web page so the frontend can read its title,
+/// description and preview image for a link card.
+#[tauri::command]
+async fn fetch_page(url: String) -> Result<Page, String> {
+    let url = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("only http and https links can be previewed".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .user_agent(PAGE_USER_AGENT)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let is_html = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("html"));
+    let mut body = Vec::new();
+    if is_html {
+        // The metadata lives in <head>, so the rest of a large page is not needed.
+        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+            body.extend_from_slice(&chunk);
+            if body.len() >= MAX_PAGE_BYTES {
+                break;
+            }
+        }
+    }
+    Ok(Page {
+        url: response.url().to_string(),
+        html: String::from_utf8_lossy(&body).into_owned(),
+    })
+}
 
 #[tauri::command]
 fn read_file(path: String) -> Result<String, String> {
@@ -124,6 +174,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(PendingFile::default())
         .setup(|app| {
             let menu = build_menu(app.handle())?;
@@ -142,6 +193,7 @@ pub fn run() {
             read_file,
             write_file,
             list_markdown_files,
+            fetch_page,
             take_pending_file
         ])
         .build(tauri::generate_context!())

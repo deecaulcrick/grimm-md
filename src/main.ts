@@ -25,7 +25,9 @@ import {
 } from "lucide";
 
 import { codeTheme } from "./codeTheme";
-import { blockEditIcons } from "./editorIcons";
+import { blockEditIcons, embedIcon } from "./editorIcons";
+import { codeLanguages, insertEmbed, renderEmbed } from "./htmlEmbed";
+import { linkCards } from "./linkCards";
 import { THEMES, applyTheme, type Theme } from "./themes";
 
 type Mode = "rich" | "source";
@@ -235,6 +237,46 @@ function setFocused(pane: Pane) {
   renderSidebar();
 }
 
+// ---------- resizing ----------
+
+const SIDEBAR_DEFAULT = 256;
+const SIDEBAR_MIN = 190;
+const SIDEBAR_MAX = 460;
+const SPLIT_MIN = 0.22;
+
+/** Turns an element into a drag handle; `onDrag` receives the pointer's x position. */
+function draggable(handle: HTMLElement, onDrag: (x: number) => void, onReset: () => void) {
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+    const move = (event: PointerEvent) => onDrag(event.clientX);
+    const stop = () => {
+      document.body.classList.remove("resizing");
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", stop);
+      handle.removeEventListener("pointercancel", stop);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", stop);
+    handle.addEventListener("pointercancel", stop);
+  });
+  handle.addEventListener("dblclick", onReset);
+}
+
+function setSidebarWidth(width: number) {
+  const clamped = Math.round(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, width)));
+  app.style.setProperty("--sidebar-w", `${clamped}px`);
+  localStorage.setItem("sidebarWidth", String(clamped));
+}
+
+function setSplitRatio(ratio: number) {
+  const clamped = Math.min(1 - SPLIT_MIN, Math.max(SPLIT_MIN, ratio));
+  panesEl.style.setProperty("--split", `${(clamped * 100).toFixed(2)}%`);
+  localStorage.setItem("splitRatio", String(clamped));
+}
+
 // ---------- panes ----------
 
 function createPane(): Pane {
@@ -243,6 +285,19 @@ function createPane(): Pane {
   barEl.setAttribute("data-tauri-drag-region", "");
   const bodyEl = el("div", "pane-body");
   paneEl.append(barEl, bodyEl);
+  if (panes.length) {
+    const divider = el("div", "pane-divider");
+    divider.title = "Drag to resize, double-click to reset";
+    draggable(
+      divider,
+      (x) => {
+        const bounds = panesEl.getBoundingClientRect();
+        setSplitRatio((x - bounds.left) / bounds.width);
+      },
+      () => setSplitRatio(0.5),
+    );
+    panesEl.append(divider);
+  }
   panesEl.append(paneEl);
   const pane: Pane = { docs: [], active: null, el: paneEl, barEl, bodyEl };
   paneEl.addEventListener("mousedown", () => setFocused(pane), true);
@@ -254,6 +309,7 @@ function createPane(): Pane {
 function removePane(pane: Pane) {
   panes.splice(panes.indexOf(pane), 1);
   pane.el.remove();
+  panesEl.querySelector(".pane-divider")?.remove();
   if (focused === pane) focused = panes[0];
 }
 
@@ -355,13 +411,25 @@ async function mountRich(doc: Doc, markdown: string) {
     features: { [Crepe.Feature.Latex]: false },
     featureConfigs: {
       [Crepe.Feature.Placeholder]: { text: "Start writing…", mode: "doc" },
-      [Crepe.Feature.CodeMirror]: { theme: codeTheme },
-      [Crepe.Feature.BlockEdit]: blockEditIcons,
+      [Crepe.Feature.CodeMirror]: {
+        theme: codeTheme,
+        languages: codeLanguages,
+        renderPreview: renderEmbed,
+        previewOnlyByDefault: true,
+        previewToggleText: (previewOnly) => (previewOnly ? "Edit HTML" : "Hide HTML"),
+      },
+      [Crepe.Feature.BlockEdit]: {
+        ...blockEditIcons,
+        buildMenu: (builder) => {
+          builder.getGroup("advanced").addItem("embed", { label: "HTML embed", icon: embedIcon, onRun: insertEmbed });
+        },
+      },
     },
   });
   instance.editor.config((ctx) => {
     ctx.update(remarkStringifyOptionsCtx, (options) => ({ ...options, bullet: "-" as const, rule: "-" as const }));
   });
+  instance.editor.use(linkCards);
   instance.on((listener) => {
     listener.markdownUpdated((_ctx, md) => {
       if (doc.crepe !== instance || doc.mode !== "rich") return;
@@ -783,6 +851,9 @@ async function init() {
   applyTheme(theme);
   document.documentElement.dataset.font = docFont;
   if (localStorage.getItem("sidebarCollapsed") === "true") app.classList.add("sidebar-collapsed");
+  setSidebarWidth(Number(localStorage.getItem("sidebarWidth")) || SIDEBAR_DEFAULT);
+  setSplitRatio(Number(localStorage.getItem("splitRatio")) || 0.5);
+  draggable($("sidebar-resizer"), setSidebarWidth, () => setSidebarWidth(SIDEBAR_DEFAULT));
   if (inTauri && navigator.userAgent.includes("Mac")) app.classList.add("overlay-titlebar");
 
   focused = createPane();

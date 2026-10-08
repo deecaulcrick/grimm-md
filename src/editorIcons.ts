@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   Code,
   GripVertical,
   Heading1,
@@ -49,3 +50,5 @@ export const blockEditIcons = {
     table: { icon: svg(Table) },
   },
 };
+
+export const embedIcon = svg(AppWindow);
