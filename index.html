@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Folio</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <div class="sidebar-top" data-tauri-drag-region></div>
+        <nav class="sidebar-actions">
+          <button id="btn-new" class="nav-item">
+            <svg viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11" /></svg>
+            <span>New document</span><kbd>⌘N</kbd>
+          </button>
+          <button id="btn-open" class="nav-item">
+            <svg viewBox="0 0 20 20"><path d="M5.5 3.5h6l3 3v10h-9zM11.5 3.5v3h3" /></svg>
+            <span>Open file</span><kbd>⌘O</kbd>
+          </button>
+          <button id="btn-folder" class="nav-item">
+            <svg viewBox="0 0 20 20"><path d="M3.5 5.5h4.5l1.5 2h7v8h-13z" /></svg>
+            <span>Open folder</span>
+          </button>
+        </nav>
+        <div class="sidebar-scroll">
+          <section id="folder-section" hidden>
+            <header>
+              <h2 id="folder-name"></h2>
+              <button id="btn-close-folder" class="icon-btn small" title="Close folder">
+                <svg viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" /></svg>
+              </button>
+            </header>
+            <ul id="folder-list" class="file-list"></ul>
+          </section>
+          <section id="recent-section" hidden>
+            <header><h2>Recents</h2></header>
+            <ul id="recent-list" class="file-list"></ul>
+          </section>
+        </div>
+      </aside>
+
+      <main id="main">
+        <header id="topbar" data-tauri-drag-region>
+          <button id="btn-sidebar" class="icon-btn" title="Toggle sidebar (⌘\)">
+            <svg viewBox="0 0 20 20"><rect x="3.5" y="4.5" width="13" height="11" rx="2" /><path d="M8 4.5v11" /></svg>
+          </button>
+          <div id="doc-title" data-tauri-drag-region>
+            <span id="doc-name" data-tauri-drag-region>Untitled</span>
+            <span id="doc-dirty" title="Unsaved changes" hidden></span>
+          </div>
+          <div class="topbar-right">
+            <div class="segmented" role="tablist">
+              <button id="mode-rich" class="active" role="tab">Document</button>
+              <button id="mode-source" role="tab">Markdown</button>
+            </div>
+            <button id="btn-save" class="btn-primary" title="Save (⌘S)">Save</button>
+          </div>
+        </header>
+
+        <div id="scroller">
+          <div id="page">
+            <div id="editor"></div>
+            <textarea id="source" spellcheck="false" hidden placeholder="Start writing…"></textarea>
+          </div>
+        </div>
+
+        <footer id="statusbar">
+          <span id="doc-path"></span>
+          <span id="doc-stats"></span>
+        </footer>
+      </main>
+    </div>
+    <div id="toast" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
