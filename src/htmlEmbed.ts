@@ -22,7 +22,7 @@ export const codeLanguages = [
 
 // Embedded pages report their own height, since a sandboxed frame cannot be measured from outside.
 window.addEventListener("message", (event) => {
-  const height = Number(event.data?.folioEmbedHeight);
+  const height = Number(event.data?.grimmEmbedHeight);
   if (!Number.isFinite(height)) return;
   for (const frame of document.querySelectorAll<HTMLIFrameElement>("iframe.html-embed")) {
     if (frame.contentWindow !== event.source) continue;
@@ -31,7 +31,7 @@ window.addEventListener("message", (event) => {
 });
 
 const REPORT_HEIGHT = `<script>
-  const report = () => parent.postMessage({ folioEmbedHeight: document.documentElement.scrollHeight }, "*");
+  const report = () => parent.postMessage({ grimmEmbedHeight: document.documentElement.scrollHeight }, "*");
   new ResizeObserver(report).observe(document.documentElement);
   addEventListener("load", report);
 </script>`;

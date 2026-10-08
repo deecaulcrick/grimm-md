@@ -8,7 +8,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ask, open, save } from "@tauri-apps/plugin-dialog";
+import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import {
   ArrowRightLeft,
   Code,
@@ -118,11 +120,12 @@ function iconButton(node: IconNode, title: string, onClick: (e: MouseEvent) => v
 }
 
 let toastTimer = 0;
-function toast(text: string) {
+/** Shows a brief message; a duration of 0 keeps it up until the next one. */
+function toast(text: string, duration = 2600) {
   toastEl.textContent = text;
   toastEl.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => (toastEl.hidden = true), 2600);
+  if (duration) toastTimer = window.setTimeout(() => (toastEl.hidden = true), duration);
 }
 
 async function confirmDiscard(text: string, okLabel: string): Promise<boolean> {
@@ -199,7 +202,7 @@ function renderBar(pane: Pane) {
 function renderFocus() {
   for (const pane of panes) pane.el.classList.toggle("focused", pane === focused);
   const doc = focused.active;
-  const name = doc ? docName(doc) : "Folio";
+  const name = doc ? docName(doc) : "Grimm";
   docPath.textContent = doc?.path ? tildify(doc.path) : "Not saved yet";
   document.title = name;
   if (inTauri) getCurrentWindow().setTitle(name).catch(() => {});
@@ -736,6 +739,48 @@ function toggleAppearance(anchor: HTMLElement) {
   appearanceMenu.style.left = `${Math.max(8, rect.right - appearanceMenu.offsetWidth)}px`;
 }
 
+// ---------- updates ----------
+
+let updating = false;
+
+async function installUpdate(update: Update) {
+  const unsaved = allDocs().filter((d) => d.dirty).length;
+  if (unsaved && !(await confirmDiscard("Updating restarts Grimm and discards unsaved changes. Continue?", "Update")))
+    return;
+  updating = true;
+  toast(`Downloading Grimm ${update.version}…`, 0);
+  try {
+    await update.downloadAndInstall();
+    await relaunch();
+  } catch (err) {
+    updating = false;
+    toast(`Update failed: ${err}`);
+  }
+}
+
+/** Looks for a newer release. Only a manual check reports "up to date" or errors. */
+async function checkForUpdates(manual = false) {
+  if (!inTauri || updating) return;
+  let update: Update | null;
+  try {
+    update = await check();
+  } catch (err) {
+    if (manual) await message(`Couldn't check for updates.\n${err}`, { title: "Grimm", kind: "error" });
+    return;
+  }
+  if (!update) {
+    if (manual) await message("You're on the latest version.", { title: "Grimm" });
+    return;
+  }
+  const notes = update.body?.trim() ? `\n\n${update.body.trim()}` : "";
+  const install = await ask(`Grimm ${update.version} is available (you have ${update.currentVersion}).${notes}`, {
+    title: "Update available",
+    okLabel: "Update and restart",
+    cancelLabel: "Later",
+  });
+  if (install) await installUpdate(update);
+}
+
 // ---------- commands ----------
 
 function cycleTab(step: number) {
@@ -758,6 +803,7 @@ const commands: Record<string, () => unknown> = {
   "prev-tab": () => cycleTab(-1),
   // Goes through the window so the unsaved-changes check runs first.
   quit: () => inTauri && getCurrentWindow().close(),
+  "check-updates": () => checkForUpdates(true),
 };
 
 // A shortcut can arrive both as a keydown and as a native menu event; the
@@ -889,6 +935,7 @@ async function init() {
   const pending = await invoke<string | null>("take_pending_file");
   if (pending) await openPath(pending);
   await refreshFolder();
+  checkForUpdates();
 }
 
 init();

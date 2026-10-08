@@ -12,7 +12,7 @@ const MARKDOWN_EXTENSIONS: [&str; 4] = ["md", "markdown", "mdx", "mdown"];
 const MAX_DEPTH: usize = 4;
 const MAX_FILES: usize = 2000;
 const MAX_PAGE_BYTES: usize = 600_000;
-const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh) Folio/0.1 LinkPreview";
+const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh) Grimm/0.1 LinkPreview";
 
 #[derive(serde::Serialize)]
 struct Page {
@@ -120,8 +120,9 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
             .build(app)
     };
 
-    let app_menu = SubmenuBuilder::new(app, "Folio")
+    let app_menu = SubmenuBuilder::new(app, "Grimm")
         .about(None)
+        .text("check-updates", "Check for Updates…")
         .separator()
         .services()
         .separator()
@@ -129,7 +130,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .hide_others()
         .show_all()
         .separator()
-        .item(&item("quit", "Quit Folio", "CmdOrCtrl+Q")?)
+        .item(&item("quit", "Quit Grimm", "CmdOrCtrl+Q")?)
         .build()?;
     let file = SubmenuBuilder::new(app, "File")
         .item(&item("new", "New Document", "CmdOrCtrl+N")?)
@@ -175,6 +176,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PendingFile::default())
         .setup(|app| {
             let menu = build_menu(app.handle())?;

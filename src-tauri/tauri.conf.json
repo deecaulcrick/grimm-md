@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Folio",
+  "productName": "Grimm",
   "version": "0.1.0",
-  "identifier": "com.dee.folio",
+  "identifier": "com.deecaulcrick.grimm",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Folio",
+        "title": "Grimm",
         "width": 1120,
         "height": 800,
         "minWidth": 520,
@@ -21,11 +21,16 @@
         "hiddenTitle": true
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,10 +40,25 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["md", "markdown", "mdx"],
+        "ext": [
+          "md",
+          "markdown",
+          "mdx"
+        ],
         "name": "Markdown Document",
         "role": "Editor"
       }
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDAwMDExOTEyNjMzM0ZCODgKUldTSSt6TmpFaGtCQUJka092YXRjdDBYWElzTkZvS21sZlQrZC9BOGk5OUtrZWszK0VPRTR3WnoK",
+      "endpoints": [
+        "https://github.com/deecaulcrick/grimm-md/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
