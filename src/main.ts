@@ -9,39 +9,83 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
+import {
+  ArrowRightLeft,
+  Code,
+  Columns2,
+  FileText,
+  FolderOpen,
+  Palette,
+  PanelLeft,
+  Plus,
+  X,
+  createElement,
+  createIcons,
+  type IconNode,
+} from "lucide";
+
+import { codeTheme } from "./codeTheme";
+import { THEMES, applyTheme, type Theme } from "./themes";
 
 type Mode = "rich" | "source";
+type DocFont = "serif" | "sans";
+
+interface Doc {
+  path: string | null;
+  dirty: boolean;
+  mode: Mode;
+  crepe: Crepe | null;
+  // YAML frontmatter is kept out of the rich editor (it would be parsed as a
+  // rule + heading) and re-attached when the document is serialized.
+  frontmatter: string;
+  // What the rich editor serializes an untouched document to; used to tell real
+  // edits apart from the editor merely normalizing markdown on load.
+  baseline: string;
+  pane: Pane;
+  el: HTMLElement;
+  editorEl: HTMLElement;
+  sourceEl: HTMLTextAreaElement;
+}
+
+interface Pane {
+  docs: Doc[];
+  active: Doc | null;
+  el: HTMLElement;
+  barEl: HTMLElement;
+  bodyEl: HTMLElement;
+}
+
+interface Session {
+  panes: { paths: string[]; active: string | null }[];
+}
 
 // The UI also runs in a plain browser (vite dev) with file access disabled.
 const inTauri = "__TAURI_INTERNALS__" in window;
 const MARKDOWN_EXTENSIONS = ["md", "markdown", "mdx", "mdown"];
 const MAX_RECENTS = 12;
+const MAX_PANES = 2;
 const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/;
+const ICON_ATTRS = { "stroke-width": 1.5 };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const app = $("app");
-const editorEl = $("editor");
-const sourceEl = $<HTMLTextAreaElement>("source");
-const docName = $("doc-name");
-const docDirty = $("doc-dirty");
+const panesEl = $("panes");
 const docPath = $("doc-path");
 const docStats = $("doc-stats");
-const saveBtn = $<HTMLButtonElement>("btn-save");
+const appearanceMenu = $("appearance");
 const toastEl = $("toast");
 
-let crepe: Crepe | null = null;
-let mode: Mode = "rich";
-let path: string | null = null;
-let dirty = false;
-// YAML frontmatter is kept out of the rich editor (it would be parsed as a
-// rule + heading) and re-attached when the document is serialized.
-let frontmatter = "";
-// What the rich editor serializes an untouched document to; used to tell real
-// edits apart from the editor merely normalizing markdown on load.
-let richBaseline = "";
+const panes: Pane[] = [];
+let focused: Pane;
 let folder: string | null = localStorage.getItem("folder");
+let folderFiles: string[] = [];
 let recents: string[] = JSON.parse(localStorage.getItem("recents") ?? "[]");
+let theme: Theme =
+  THEMES.find((t) => t.id === localStorage.getItem("theme")) ??
+  THEMES.find((t) => t.scheme === (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"))!;
+
+let docFont: DocFont = localStorage.getItem("font") === "sans" ? "sans" : "serif";
 
 // ---------- helpers ----------
 
@@ -50,6 +94,25 @@ const dirname = (p: string) => p.replace(/[\\/][^\\/]*$/, "");
 const isMarkdown = (p: string) =>
   MARKDOWN_EXTENSIONS.includes(p.split(".").pop()?.toLowerCase() ?? "");
 const tildify = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
+const docName = (doc: Doc) => (doc.path ? basename(doc.path) : "Untitled");
+const allDocs = () => panes.flatMap((p) => p.docs);
+const isPristine = (doc: Doc) => !doc.path && !doc.dirty;
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = ""): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  return node;
+}
+
+const icon = (node: IconNode) => createElement(node, { ...ICON_ATTRS, class: "lucide" });
+
+function iconButton(node: IconNode, title: string, onClick: (e: MouseEvent) => void, className = "icon-btn") {
+  const button = el("button", className);
+  button.title = title;
+  button.append(icon(node));
+  button.addEventListener("click", onClick);
+  return button;
+}
 
 let toastTimer = 0;
 function toast(text: string) {
@@ -59,95 +122,342 @@ function toast(text: string) {
   toastTimer = window.setTimeout(() => (toastEl.hidden = true), 2600);
 }
 
-async function confirmDiscard(): Promise<boolean> {
-  if (!dirty) return true;
-  const text = "You have unsaved changes. Discard them?";
+async function confirmDiscard(text: string, okLabel: string): Promise<boolean> {
   if (!inTauri) return window.confirm(text);
-  return ask(text, { title: "Unsaved changes", kind: "warning", okLabel: "Discard", cancelLabel: "Cancel" });
+  return ask(text, { title: "Unsaved changes", kind: "warning", okLabel, cancelLabel: "Cancel" });
 }
 
-// ---------- document state ----------
+// ---------- rendering ----------
 
-function getContent(): string {
-  if (mode === "source") return sourceEl.value;
-  return frontmatter + (crepe?.getMarkdown() ?? "");
+function renderBar(pane: Pane) {
+  const first = panes[0] === pane;
+  const last = panes[panes.length - 1] === pane;
+  const children: HTMLElement[] = [];
+
+  if (first) children.push(iconButton(PanelLeft, "Toggle sidebar (⌘\\)", toggleSidebar));
+
+  const tabs = el("div", "tabs");
+  tabs.setAttribute("data-tauri-drag-region", "");
+  for (const doc of pane.docs) {
+    const tab = el("div", "tab");
+    tab.classList.toggle("active", doc === pane.active);
+    tab.classList.toggle("dirty", doc.dirty);
+    tab.title = doc.path ? tildify(doc.path) : "Untitled";
+    const name = el("span", "tab-name");
+    name.textContent = docName(doc);
+    const close = el("button", "tab-close");
+    close.title = "Close tab (⌘W)";
+    close.append(icon(X));
+    close.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeDoc(doc);
+    });
+    tab.append(name, close);
+    tab.addEventListener("click", () => activate(doc));
+    tab.addEventListener("auxclick", (e) => e.button === 1 && closeDoc(doc));
+    tabs.append(tab);
+  }
+  tabs.append(iconButton(Plus, "New document (⌘N)", () => newDocument(pane), "icon-btn tab-new"));
+  children.push(tabs);
+
+  const actions = el("div", "pane-actions");
+  const doc = pane.active;
+  if (doc) {
+    const source = iconButton(Code, "Markdown source (⌘/)", () =>
+      setMode(doc, doc.mode === "rich" ? "source" : "rich"),
+    );
+    source.classList.toggle("on", doc.mode === "source");
+    actions.append(source);
+    if (panes.length > 1) {
+      actions.append(
+        iconButton(ArrowRightLeft, "Move tab to the other pane", () => {
+          const target = panes.find((p) => p !== pane);
+          if (target) moveDoc(doc, target);
+        }),
+      );
+    }
+  }
+  if (last) {
+    const split = iconButton(Columns2, panes.length > 1 ? "Close split (⇧⌘\\)" : "Split view (⇧⌘\\)", toggleSplit);
+    split.classList.toggle("on", panes.length > 1);
+    actions.append(
+      split,
+      iconButton(Palette, "Appearance", (e) => {
+        e.stopPropagation();
+        toggleAppearance(e.currentTarget as HTMLElement);
+      }),
+    );
+  }
+  children.push(actions);
+
+  pane.barEl.replaceChildren(...children);
 }
 
-function setDirty(value: boolean) {
-  dirty = value;
-  docDirty.hidden = !value;
-  saveBtn.disabled = !value && path !== null;
-}
-
-function refreshChrome() {
-  const name = path ? basename(path) : "Untitled";
-  docName.textContent = name;
-  docPath.textContent = path ? tildify(path) : "Not saved yet";
+function renderFocus() {
+  for (const pane of panes) pane.el.classList.toggle("focused", pane === focused);
+  const doc = focused.active;
+  const name = doc ? docName(doc) : "Folio";
+  docPath.textContent = doc?.path ? tildify(doc.path) : "Not saved yet";
   document.title = name;
   if (inTauri) getCurrentWindow().setTitle(name).catch(() => {});
-  setDirty(dirty);
+  renderStats();
+}
+
+function renderStats() {
+  const doc = focused.active;
+  if (!doc) return;
+  const text = getContent(doc).replace(FRONTMATTER, "");
+  const words = text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0;
+  const count = `${words.toLocaleString()} ${words === 1 ? "word" : "words"}`;
+  docStats.textContent = doc.dirty ? `Edited  ·  ${count}` : count;
+}
+
+function render() {
+  panes.forEach(renderBar);
+  renderFocus();
+  renderSidebar();
+  const session: Session = {
+    panes: panes.map((p) => ({
+      paths: p.docs.flatMap((d) => (d.path ? [d.path] : [])),
+      active: p.active?.path ?? null,
+    })),
+  };
+  localStorage.setItem("session", JSON.stringify(session));
+}
+
+function setFocused(pane: Pane) {
+  if (focused === pane) return;
+  focused = pane;
+  // Only classes and the status bar change here: rebuilding the tab bar on
+  // mousedown would swallow the click that caused the focus change.
+  renderFocus();
   renderSidebar();
 }
 
-function refreshStats() {
-  const text = getContent().replace(FRONTMATTER, "");
-  const words = text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0;
-  docStats.textContent = `${words.toLocaleString()} ${words === 1 ? "word" : "words"}`;
+// ---------- panes ----------
+
+function createPane(): Pane {
+  const paneEl = el("section", "pane");
+  const barEl = el("header", "pane-bar");
+  barEl.setAttribute("data-tauri-drag-region", "");
+  const bodyEl = el("div", "pane-body");
+  paneEl.append(barEl, bodyEl);
+  panesEl.append(paneEl);
+  const pane: Pane = { docs: [], active: null, el: paneEl, barEl, bodyEl };
+  paneEl.addEventListener("mousedown", () => setFocused(pane), true);
+  paneEl.addEventListener("focusin", () => setFocused(pane));
+  panes.push(pane);
+  return pane;
 }
 
-function autosizeSource() {
-  sourceEl.style.height = "auto";
-  sourceEl.style.height = `${sourceEl.scrollHeight}px`;
+function removePane(pane: Pane) {
+  panes.splice(panes.indexOf(pane), 1);
+  pane.el.remove();
+  if (focused === pane) focused = panes[0];
 }
 
-async function mountRich(markdown: string) {
+function detach(doc: Doc) {
+  const pane = doc.pane;
+  const index = pane.docs.indexOf(doc);
+  pane.docs.splice(index, 1);
+  if (pane.active === doc) pane.active = pane.docs[Math.min(index, pane.docs.length - 1)] ?? null;
+}
+
+function attach(doc: Doc, pane: Pane) {
+  doc.pane = pane;
+  doc.el.hidden = true;
+  pane.docs.push(doc);
+  pane.bodyEl.append(doc.el);
+}
+
+/** Makes sure a pane that just lost a tab still shows something, or goes away. */
+async function settlePane(pane: Pane) {
+  if (pane.active) showActive(pane);
+  else if (panes.length > 1) removePane(pane);
+  else await createDoc(pane, null, "");
+}
+
+function showActive(pane: Pane) {
+  for (const doc of pane.docs) doc.el.hidden = doc !== pane.active;
+  if (pane.active?.mode === "source") autosizeSource(pane.active);
+}
+
+function activate(doc: Doc) {
+  doc.pane.active = doc;
+  focused = doc.pane;
+  showActive(doc.pane);
+  render();
+}
+
+async function moveDoc(doc: Doc, target: Pane) {
+  const source = doc.pane;
+  detach(doc);
+  attach(doc, target);
+  await settlePane(source);
+  activate(doc);
+}
+
+async function toggleSplit() {
+  if (panes.length < MAX_PANES) {
+    const source = focused;
+    const pane = createPane();
+    if (source.docs.length > 1 && source.active) await moveDoc(source.active, pane);
+    else await createDoc(pane, null, "");
+    return;
+  }
+  const [first, second] = panes;
+  const keep = focused.active;
+  for (const doc of [...second.docs]) {
+    detach(doc);
+    if (isPristine(doc)) {
+      await doc.crepe?.destroy();
+      doc.el.remove();
+    } else {
+      attach(doc, first);
+    }
+  }
+  removePane(second);
+  const next = keep && first.docs.includes(keep) ? keep : first.active;
+  if (next) activate(next);
+}
+
+// ---------- documents ----------
+
+function getContent(doc: Doc): string {
+  if (doc.mode === "source") return doc.sourceEl.value;
+  return doc.frontmatter + (doc.crepe?.getMarkdown() ?? "");
+}
+
+function setDirty(doc: Doc, value: boolean) {
+  if (doc.dirty === value) return;
+  doc.dirty = value;
+  renderBar(doc.pane);
+  if (focused.active === doc) renderStats();
+}
+
+function autosizeSource(doc: Doc) {
+  doc.sourceEl.style.height = "auto";
+  doc.sourceEl.style.height = `${doc.sourceEl.scrollHeight}px`;
+}
+
+async function mountRich(doc: Doc, markdown: string) {
   const match = markdown.match(FRONTMATTER);
-  frontmatter = match ? match[0] : "";
-  const body = markdown.slice(frontmatter.length);
+  doc.frontmatter = match ? match[0] : "";
+  const body = markdown.slice(doc.frontmatter.length);
 
-  await crepe?.destroy();
-  editorEl.replaceChildren();
+  await doc.crepe?.destroy();
+  doc.crepe = null;
+  doc.editorEl.replaceChildren();
   const instance = new Crepe({
-    root: editorEl,
+    root: doc.editorEl,
     defaultValue: body,
     features: { [Crepe.Feature.Latex]: false },
-    featureConfigs: { [Crepe.Feature.Placeholder]: { text: "Start writing…", mode: "doc" } },
+    featureConfigs: {
+      [Crepe.Feature.Placeholder]: { text: "Start writing…", mode: "doc" },
+      [Crepe.Feature.CodeMirror]: { theme: codeTheme },
+    },
   });
   instance.editor.config((ctx) => {
     ctx.update(remarkStringifyOptionsCtx, (options) => ({ ...options, bullet: "-" as const, rule: "-" as const }));
   });
   instance.on((listener) => {
     listener.markdownUpdated((_ctx, md) => {
-      if (crepe !== instance || mode !== "rich") return;
-      if (md !== richBaseline) setDirty(true);
-      refreshStats();
+      if (doc.crepe !== instance || doc.mode !== "rich") return;
+      if (md !== doc.baseline) setDirty(doc, true);
+      if (focused.active === doc) renderStats();
     });
   });
   await instance.create();
-  crepe = instance;
-  richBaseline = instance.getMarkdown();
+  doc.crepe = instance;
+  doc.baseline = instance.getMarkdown();
 }
 
-async function setContent(markdown: string) {
-  if (mode === "source") {
-    sourceEl.value = markdown;
-    autosizeSource();
+async function setMode(doc: Doc, next: Mode) {
+  if (next === doc.mode) return;
+  const content = getContent(doc);
+  doc.mode = next;
+  doc.editorEl.hidden = next !== "rich";
+  doc.sourceEl.hidden = next !== "source";
+  if (next === "source") {
+    doc.sourceEl.value = content;
+    autosizeSource(doc);
+    doc.sourceEl.focus();
   } else {
-    await mountRich(markdown);
+    await mountRich(doc, content);
   }
-  refreshStats();
+  render();
 }
 
-async function setMode(next: Mode) {
-  if (next === mode) return;
-  const content = getContent();
-  mode = next;
-  $("mode-rich").classList.toggle("active", mode === "rich");
-  $("mode-source").classList.toggle("active", mode === "source");
-  editorEl.hidden = mode !== "rich";
-  sourceEl.hidden = mode !== "source";
-  await setContent(content);
-  if (mode === "source") sourceEl.focus();
+async function createDoc(pane: Pane, path: string | null, content: string): Promise<Doc> {
+  const docEl = el("div", "doc");
+  const page = el("div", "page");
+  const editorEl = el("div", "editor");
+  const sourceEl = el("textarea", "source");
+  sourceEl.spellcheck = false;
+  sourceEl.placeholder = "Start writing…";
+  sourceEl.hidden = true;
+  page.append(editorEl, sourceEl);
+  docEl.append(page);
+
+  const doc: Doc = {
+    path,
+    dirty: false,
+    mode: "rich",
+    crepe: null,
+    frontmatter: "",
+    baseline: "",
+    pane,
+    el: docEl,
+    editorEl,
+    sourceEl,
+  };
+
+  sourceEl.addEventListener("input", () => {
+    setDirty(doc, true);
+    autosizeSource(doc);
+    renderStats();
+  });
+  sourceEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab" || e.metaKey || e.ctrlKey || e.altKey) return;
+    e.preventDefault();
+    document.execCommand("insertText", false, "  ");
+  });
+  // Clicking the empty space below the text puts the caret at the end of the document.
+  page.addEventListener("mousedown", (e) => {
+    if (e.target !== page && e.target !== editorEl) return;
+    if (doc.mode !== "rich") return;
+    e.preventDefault();
+    const pm = editorEl.querySelector<HTMLElement>(".ProseMirror");
+    if (!pm) return;
+    pm.focus();
+    const selection = window.getSelection();
+    selection?.selectAllChildren(pm);
+    selection?.collapseToEnd();
+  });
+
+  attach(doc, pane);
+  await mountRich(doc, content);
+  activate(doc);
+  return doc;
+}
+
+async function closeDoc(doc: Doc, confirm = true): Promise<boolean> {
+  if (confirm && doc.dirty) {
+    activate(doc);
+    if (!(await confirmDiscard(`“${docName(doc)}” has unsaved changes. Close it anyway?`, "Close"))) return false;
+  }
+  const pane = doc.pane;
+  detach(doc);
+  await doc.crepe?.destroy();
+  doc.el.remove();
+  await settlePane(pane);
+  render();
+  return true;
+}
+
+async function newDocument(pane = focused) {
+  const doc = await createDoc(pane, null, "");
+  doc.editorEl.querySelector<HTMLElement>(".ProseMirror")?.focus();
 }
 
 // ---------- file operations ----------
@@ -157,81 +467,71 @@ function rememberRecent(p: string) {
   localStorage.setItem("recents", JSON.stringify(recents));
 }
 
-async function loadFile(p: string, { skipConfirm = false } = {}) {
-  if (!skipConfirm && !(await confirmDiscard())) return;
+async function openPath(p: string, { otherPane = false, quiet = false } = {}) {
+  const existing = allDocs().find((d) => d.path === p);
+  if (existing) return activate(existing);
+
   let text: string;
   try {
     text = await invoke<string>("read_file", { path: p });
   } catch (err) {
     recents = recents.filter((r) => r !== p);
     localStorage.setItem("recents", JSON.stringify(recents));
-    if (localStorage.getItem("lastFile") === p) localStorage.removeItem("lastFile");
     renderSidebar();
-    toast(`Couldn't open ${basename(p)}: ${err}`);
+    if (!quiet) toast(`Couldn't open ${basename(p)}: ${err}`);
     return;
   }
-  path = p;
-  dirty = false;
-  await setContent(text);
-  rememberRecent(p);
-  localStorage.setItem("lastFile", p);
-  refreshChrome();
-  $("scroller").scrollTop = 0;
-}
 
-async function newDocument() {
-  if (!(await confirmDiscard())) return;
-  path = null;
-  dirty = false;
-  localStorage.removeItem("lastFile");
-  await setContent("");
-  refreshChrome();
-  if (mode === "source") sourceEl.focus();
-  else editorEl.querySelector<HTMLElement>(".ProseMirror")?.focus();
+  let pane = focused;
+  if (otherPane) pane = panes.find((candidate) => candidate !== focused) ?? createPane();
+  // An untouched "Untitled" tab is replaced rather than left behind.
+  const placeholder = pane.active && isPristine(pane.active) ? pane.active : null;
+  await createDoc(pane, p, text);
+  if (placeholder) await closeDoc(placeholder, false);
+  rememberRecent(p);
+  render();
 }
 
 async function openDialog() {
   if (!inTauri) return toast("Opening files needs the desktop app");
   const picked = await open({
-    multiple: false,
+    multiple: true,
     filters: [
       { name: "Markdown", extensions: MARKDOWN_EXTENSIONS },
       { name: "All files", extensions: ["*"] },
     ],
   });
-  if (typeof picked === "string") await loadFile(picked);
+  for (const p of picked ?? []) await openPath(p);
 }
 
-async function saveDocument(saveAs = false) {
+async function saveDocument(doc: Doc | null, saveAs = false) {
+  if (!doc) return;
   if (!inTauri) return toast("Saving needs the desktop app");
-  let target = path;
+  let target = doc.path;
   if (!target || saveAs) {
     const picked = await save({
-      defaultPath: path ?? (folder ? `${folder}/Untitled.md` : "Untitled.md"),
+      defaultPath: doc.path ?? (folder ? `${folder}/Untitled.md` : "Untitled.md"),
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     if (!picked) return;
     target = picked;
   }
   try {
-    await invoke("write_file", { path: target, contents: getContent() });
+    await invoke("write_file", { path: target, contents: getContent(doc) });
   } catch (err) {
     toast(`Couldn't save: ${err}`);
     return;
   }
-  path = target;
-  dirty = false;
-  if (mode === "rich" && crepe) richBaseline = crepe.getMarkdown();
+  doc.path = target;
+  doc.dirty = false;
+  if (doc.mode === "rich" && doc.crepe) doc.baseline = doc.crepe.getMarkdown();
   rememberRecent(target);
-  localStorage.setItem("lastFile", target);
-  refreshChrome();
+  render();
   if (folder && target.startsWith(folder)) await refreshFolder();
   toast("Saved");
 }
 
 // ---------- sidebar ----------
-
-let folderFiles: string[] = [];
 
 async function refreshFolder() {
   if (!folder || !inTauri) return renderSidebar();
@@ -254,39 +554,37 @@ async function openFolderDialog() {
   await refreshFolder();
 }
 
-function fileItem(p: string, detail: string): HTMLLIElement {
-  const li = document.createElement("li");
-  li.title = p;
-  li.classList.toggle("current", p === path);
-  const name = document.createElement("span");
-  name.className = "name";
+function fileItem(p: string, detail: string, openPaths: Set<string>): HTMLLIElement {
+  const li = el("li");
+  li.title = `${p}\n⌘-click to open in the other pane`;
+  li.classList.toggle("open", openPaths.has(p));
+  li.classList.toggle("current", focused.active?.path === p);
+  const name = el("span", "name");
   name.textContent = basename(p);
   li.append(name);
   if (detail) {
-    const dir = document.createElement("span");
-    dir.className = "dir";
+    const dir = el("span", "dir");
     // The bidi mark keeps the leading "/" or "~" in place inside the rtl-truncated label.
     dir.textContent = `‎${detail}`;
     li.append(dir);
   }
-  li.addEventListener("click", () => p !== path && loadFile(p));
+  li.addEventListener("click", (e) => openPath(p, { otherPane: e.metaKey || e.ctrlKey }));
   return li;
 }
 
 function renderSidebar() {
-  const folderSection = $("folder-section");
-  folderSection.hidden = !folder;
+  const openPaths = new Set(allDocs().flatMap((d) => (d.path ? [d.path] : [])));
+  $("folder-section").hidden = !folder;
   if (folder) {
     $("folder-name").textContent = basename(folder);
     $("folder-name").title = folder;
     const root = folder;
     const items = folderFiles.map((p) => {
       const rel = dirname(p).slice(root.length).replace(/^[\\/]/, "");
-      return fileItem(p, rel);
+      return fileItem(p, rel, openPaths);
     });
     if (!items.length) {
-      const empty = document.createElement("li");
-      empty.className = "empty";
+      const empty = el("li", "empty");
       empty.textContent = "No markdown files";
       items.push(empty);
     }
@@ -294,7 +592,7 @@ function renderSidebar() {
   }
 
   $("recent-section").hidden = recents.length === 0;
-  $("recent-list").replaceChildren(...recents.map((p) => fileItem(p, tildify(dirname(p)))));
+  $("recent-list").replaceChildren(...recents.map((p) => fileItem(p, tildify(dirname(p)), openPaths)));
 }
 
 function toggleSidebar() {
@@ -302,9 +600,141 @@ function toggleSidebar() {
   localStorage.setItem("sidebarCollapsed", String(collapsed));
 }
 
+// ---------- appearance ----------
+
+function setTheme(next: Theme) {
+  theme = next;
+  applyTheme(next);
+  localStorage.setItem("theme", next.id);
+}
+
+function setDocFont(next: DocFont) {
+  docFont = next;
+  document.documentElement.dataset.font = next;
+  localStorage.setItem("font", next);
+}
+
+function renderAppearance() {
+  const label = (text: string) => {
+    const node = el("div", "menu-label");
+    node.textContent = text;
+    return node;
+  };
+
+  const grid = el("div", "theme-grid");
+  for (const t of THEMES) {
+    const tile = el("button", "theme-tile");
+    tile.classList.toggle("selected", t === theme);
+    const preview = el("span", "tile-preview");
+    preview.style.background = t.bg;
+    preview.style.color = t.text;
+    preview.textContent = "Aa";
+    const dot = el("i");
+    dot.style.background = t.accent;
+    preview.append(dot);
+    const name = el("span", "tile-name");
+    name.textContent = t.name;
+    tile.append(preview, name);
+    tile.addEventListener("click", () => {
+      setTheme(t);
+      renderAppearance();
+    });
+    grid.append(tile);
+  }
+
+  const fonts = el("div", "font-toggle");
+  for (const [id, text] of [["serif", "Serif"], ["sans", "Sans"]] as const) {
+    const button = el("button", id);
+    button.textContent = text;
+    button.classList.toggle("selected", id === docFont);
+    button.addEventListener("click", () => {
+      setDocFont(id);
+      renderAppearance();
+    });
+    fonts.append(button);
+  }
+
+  appearanceMenu.replaceChildren(label("Theme"), grid, label("Font"), fonts);
+}
+
+function toggleAppearance(anchor: HTMLElement) {
+  if (!appearanceMenu.hidden) return void (appearanceMenu.hidden = true);
+  renderAppearance();
+  appearanceMenu.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  appearanceMenu.style.top = `${rect.bottom + 6}px`;
+  appearanceMenu.style.left = `${Math.max(8, rect.right - appearanceMenu.offsetWidth)}px`;
+}
+
+// ---------- commands ----------
+
+function cycleTab(step: number) {
+  const { docs, active } = focused;
+  if (!active || docs.length < 2) return;
+  activate(docs[(docs.indexOf(active) + step + docs.length) % docs.length]);
+}
+
+const commands: Record<string, () => unknown> = {
+  new: () => newDocument(),
+  open: openDialog,
+  "open-folder": openFolderDialog,
+  save: () => saveDocument(focused.active),
+  "save-as": () => saveDocument(focused.active, true),
+  "close-tab": () => focused.active && closeDoc(focused.active),
+  "toggle-sidebar": toggleSidebar,
+  "toggle-source": () => focused.active && setMode(focused.active, focused.active.mode === "rich" ? "source" : "rich"),
+  "toggle-split": toggleSplit,
+  "next-tab": () => cycleTab(1),
+  "prev-tab": () => cycleTab(-1),
+  // Goes through the window so the unsaved-changes check runs first.
+  quit: () => inTauri && getCurrentWindow().close(),
+};
+
+// A shortcut can arrive both as a keydown and as a native menu event; the
+// short window keeps it from running twice.
+let lastCommand = "";
+let lastCommandAt = 0;
+function run(id: string) {
+  const now = performance.now();
+  if (id === lastCommand && now - lastCommandAt < 250) return;
+  lastCommand = id;
+  lastCommandAt = now;
+  commands[id]?.();
+}
+
+function shortcut(e: KeyboardEvent): string | null {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey) return null;
+  switch (e.code) {
+    case "KeyS":
+      return e.shiftKey ? "save-as" : "save";
+    case "KeyO":
+      return e.shiftKey ? "open-folder" : "open";
+    case "KeyN":
+    case "KeyT":
+      return e.shiftKey ? null : "new";
+    case "KeyW":
+      return e.shiftKey ? null : "close-tab";
+    case "Backslash":
+      return e.shiftKey ? "toggle-split" : "toggle-sidebar";
+    case "Slash":
+      return "toggle-source";
+    case "BracketRight":
+      return e.shiftKey ? "next-tab" : null;
+    case "BracketLeft":
+      return e.shiftKey ? "prev-tab" : null;
+    default:
+      return null;
+  }
+}
+
 // ---------- wiring ----------
 
-$("btn-new").addEventListener("click", newDocument);
+createIcons({
+  icons: { Plus, FileText, FolderOpen, X },
+  attrs: ICON_ATTRS,
+});
+
+$("btn-new").addEventListener("click", () => newDocument());
 $("btn-open").addEventListener("click", openDialog);
 $("btn-folder").addEventListener("click", openFolderDialog);
 $("btn-close-folder").addEventListener("click", () => {
@@ -313,86 +743,78 @@ $("btn-close-folder").addEventListener("click", () => {
   localStorage.removeItem("folder");
   renderSidebar();
 });
-$("btn-sidebar").addEventListener("click", toggleSidebar);
-$("btn-save").addEventListener("click", () => saveDocument());
-$("mode-rich").addEventListener("click", () => setMode("rich"));
-$("mode-source").addEventListener("click", () => setMode("source"));
-
-sourceEl.addEventListener("input", () => {
-  setDirty(true);
-  autosizeSource();
-  refreshStats();
-});
-
-sourceEl.addEventListener("keydown", (e) => {
-  if (e.key !== "Tab" || e.metaKey || e.ctrlKey || e.altKey) return;
-  e.preventDefault();
-  document.execCommand("insertText", false, "  ");
-});
-
-// Clicking the empty space below the text puts the caret at the end of the document.
-$("page").addEventListener("mousedown", (e) => {
-  if (e.target !== e.currentTarget && e.target !== editorEl) return;
-  if (mode !== "rich") return;
-  e.preventDefault();
-  const pm = editorEl.querySelector<HTMLElement>(".ProseMirror");
-  if (!pm) return;
-  pm.focus();
-  const selection = window.getSelection();
-  selection?.selectAllChildren(pm);
-  selection?.collapseToEnd();
-});
 
 window.addEventListener("keydown", (e) => {
-  if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
-  const key = e.key.toLowerCase();
-  if (key === "s") {
-    e.preventDefault();
-    saveDocument(e.shiftKey);
-  } else if (key === "o") {
-    e.preventDefault();
-    e.shiftKey ? openFolderDialog() : openDialog();
-  } else if (key === "n") {
-    e.preventDefault();
-    newDocument();
-  } else if (key === "\\") {
-    e.preventDefault();
-    toggleSidebar();
-  } else if (key === "/") {
-    e.preventDefault();
-    setMode(mode === "rich" ? "source" : "rich");
-  }
+  if (e.key === "Escape") appearanceMenu.hidden = true;
+  const id = shortcut(e);
+  if (!id) return;
+  e.preventDefault();
+  run(id);
 });
 
-window.addEventListener("resize", () => mode === "source" && autosizeSource());
+window.addEventListener("mousedown", (e) => {
+  if (!appearanceMenu.hidden && !appearanceMenu.contains(e.target as Node)) appearanceMenu.hidden = true;
+});
+
+window.addEventListener("resize", () => {
+  appearanceMenu.hidden = true;
+  for (const pane of panes) if (pane.active?.mode === "source") autosizeSource(pane.active);
+});
+
+async function restoreSession() {
+  const saved: Session | null = JSON.parse(localStorage.getItem("session") ?? "null");
+  for (const [index, entry] of (saved?.panes ?? []).slice(0, MAX_PANES).entries()) {
+    if (!entry.paths.length) continue;
+    focused = index === 0 ? panes[0] : createPane();
+    const pane = focused;
+    for (const p of entry.paths) await openPath(p, { quiet: true });
+    const active = pane.docs.find((d) => d.path === entry.active);
+    if (active) activate(active);
+    // None of this pane's files could be reopened.
+    if (!pane.docs.length && panes.length > 1) removePane(pane);
+  }
+  focused = panes[0];
+  render();
+}
 
 async function init() {
+  applyTheme(theme);
+  document.documentElement.dataset.font = docFont;
   if (localStorage.getItem("sidebarCollapsed") === "true") app.classList.add("sidebar-collapsed");
   if (inTauri && navigator.userAgent.includes("Mac")) app.classList.add("overlay-titlebar");
 
-  await setContent("");
-  refreshChrome();
+  focused = createPane();
+  await createDoc(focused, null, "");
 
   if (!inTauri) return;
 
+  await restoreSession();
+
+  await listen<string>("menu", ({ payload }) => run(payload));
+
   await listen<string>("open-file", async ({ payload }) => {
     await invoke("take_pending_file");
-    await loadFile(payload);
+    await openPath(payload);
   });
 
-  await getCurrentWebview().onDragDropEvent(({ payload }) => {
+  await getCurrentWebview().onDragDropEvent(async ({ payload }) => {
     if (payload.type !== "drop") return;
-    const dropped = payload.paths.find(isMarkdown) ?? payload.paths[0];
-    if (dropped) loadFile(dropped);
+    const dropped = payload.paths.filter(isMarkdown);
+    for (const p of dropped.length ? dropped : payload.paths.slice(0, 1)) await openPath(p);
   });
 
   await getCurrentWindow().onCloseRequested(async (event) => {
-    if (!(await confirmDiscard())) event.preventDefault();
+    const unsaved = allDocs().filter((d) => d.dirty).length;
+    if (!unsaved) return;
+    const text =
+      unsaved === 1
+        ? "A document has unsaved changes. Quit anyway?"
+        : `${unsaved} documents have unsaved changes. Quit anyway?`;
+    if (!(await confirmDiscard(text, "Quit"))) event.preventDefault();
   });
 
   const pending = await invoke<string | null>("take_pending_file");
-  const initial = pending ?? localStorage.getItem("lastFile");
-  if (initial) await loadFile(initial, { skipConfirm: true });
+  if (pending) await openPath(pending);
   await refreshFolder();
 }
 

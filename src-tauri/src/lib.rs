@@ -1,5 +1,8 @@
 use std::{fs, path::Path, sync::Mutex};
-use tauri::Manager;
+use tauri::{
+    menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
+    Emitter, Manager,
+};
 
 /// A file the OS asked us to open before the frontend was ready to receive it.
 #[derive(Default)]
@@ -58,12 +61,76 @@ fn take_pending_file(state: tauri::State<PendingFile>) -> Option<String> {
     state.0.lock().unwrap().take()
 }
 
+/// Builds the menu bar. Custom items are forwarded to the frontend as "menu"
+/// events carrying the item id, which is where the commands are implemented.
+fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    let item = |id: &str, text: &str, accelerator: &str| {
+        MenuItemBuilder::with_id(id, text)
+            .accelerator(accelerator)
+            .build(app)
+    };
+
+    let app_menu = SubmenuBuilder::new(app, "Folio")
+        .about(None)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .item(&item("quit", "Quit Folio", "CmdOrCtrl+Q")?)
+        .build()?;
+    let file = SubmenuBuilder::new(app, "File")
+        .item(&item("new", "New Document", "CmdOrCtrl+N")?)
+        .item(&item("open", "Open…", "CmdOrCtrl+O")?)
+        .item(&item("open-folder", "Open Folder…", "CmdOrCtrl+Shift+O")?)
+        .separator()
+        .item(&item("save", "Save", "CmdOrCtrl+S")?)
+        .item(&item("save-as", "Save As…", "CmdOrCtrl+Shift+S")?)
+        .separator()
+        .item(&item("close-tab", "Close Tab", "CmdOrCtrl+W")?)
+        .build()?;
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let view = SubmenuBuilder::new(app, "View")
+        .item(&item("toggle-sidebar", "Toggle Sidebar", "CmdOrCtrl+Backslash")?)
+        .item(&item("toggle-split", "Toggle Split View", "CmdOrCtrl+Shift+Backslash")?)
+        .item(&item("toggle-source", "Toggle Markdown Source", "CmdOrCtrl+Slash")?)
+        .separator()
+        .fullscreen()
+        .build()?;
+    let window = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .separator()
+        .item(&item("next-tab", "Next Tab", "CmdOrCtrl+Shift+BracketRight")?)
+        .item(&item("prev-tab", "Previous Tab", "CmdOrCtrl+Shift+BracketLeft")?)
+        .build()?;
+
+    MenuBuilder::new(app)
+        .items(&[&app_menu, &file, &edit, &view, &window])
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(PendingFile::default())
         .setup(|app| {
+            let menu = build_menu(app.handle())?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|app, event| {
+                let _ = app.emit("menu", event.id().as_ref());
+            });
             if let Some(arg) = std::env::args().nth(1) {
                 if Path::new(&arg).is_file() {
                     *app.state::<PendingFile>().0.lock().unwrap() = Some(arg);
@@ -82,7 +149,6 @@ pub fn run() {
         .run(|_app, _event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
-                use tauri::Emitter;
                 for url in urls {
                     if let Ok(path) = url.to_file_path() {
                         let path = path.to_string_lossy().to_string();
