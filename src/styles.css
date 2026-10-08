@@ -464,7 +464,8 @@ button {
 }
 
 .source {
-  flex: 1;
+  /* Not "flex: 1": its zero flex-basis would override the autosized height and clip long documents. */
+  flex: none;
   width: 100%;
   min-height: 60vh;
   border: 0;
@@ -643,9 +644,124 @@ button {
   font-family: var(--sans);
 }
 
-.milkdown .milkdown-toolbar,
-.milkdown .milkdown-slash-menu {
+.milkdown .milkdown-toolbar {
   border-radius: 10px;
+}
+
+/* Block handle (the + and drag grip beside a block) */
+
+.milkdown .milkdown-block-handle .operation-item {
+  width: 24px;
+  height: 24px;
+  padding: 3px;
+  border-radius: 6px;
+}
+
+.milkdown .milkdown-block-handle .operation-item svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  color: var(--text-3);
+}
+
+/* Slash / insert menu */
+
+.milkdown .milkdown-slash-menu {
+  width: 252px;
+  background: var(--elevated);
+  color: var(--text);
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px var(--border), 0 14px 40px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.milkdown .milkdown-slash-menu ul {
+  margin: 0;
+  padding: 0;
+}
+
+.milkdown .milkdown-slash-menu .tab-group {
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.milkdown .milkdown-slash-menu .tab-group ul {
+  padding: 0;
+  gap: 2px;
+}
+
+.milkdown .milkdown-slash-menu .tab-group ul li {
+  padding: 0 9px;
+  height: 26px;
+  line-height: 26px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.milkdown .milkdown-slash-menu .tab-group ul li:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+
+.milkdown .milkdown-slash-menu .tab-group ul li.selected {
+  background: var(--active);
+  color: var(--text);
+}
+
+.milkdown .milkdown-slash-menu .menu-groups {
+  padding: 0 6px 6px;
+  max-height: 320px;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group h6 {
+  margin: 0;
+  padding: 10px 8px 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 16px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-3);
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li {
+  min-width: 0;
+  gap: 10px;
+  padding: 0 8px;
+  height: 32px;
+  border-radius: 7px;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li.hover {
+  background: var(--hover);
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li.active {
+  background: var(--active);
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--text-2);
+  fill: none;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li > span {
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group + .menu-group::before {
+  margin: 6px 8px 0;
+  background: var(--border);
 }
 
 /* ---------- Appearance menu ---------- */

@@ -25,6 +25,7 @@ import {
 } from "lucide";
 
 import { codeTheme } from "./codeTheme";
+import { blockEditIcons } from "./editorIcons";
 import { THEMES, applyTheme, type Theme } from "./themes";
 
 type Mode = "rich" | "source";
@@ -355,6 +356,7 @@ async function mountRich(doc: Doc, markdown: string) {
     featureConfigs: {
       [Crepe.Feature.Placeholder]: { text: "Start writing…", mode: "doc" },
       [Crepe.Feature.CodeMirror]: { theme: codeTheme },
+      [Crepe.Feature.BlockEdit]: blockEditIcons,
     },
   });
   instance.editor.config((ctx) => {
