@@ -30,6 +30,7 @@ import { codeTheme } from "./codeTheme";
 import { blockEditIcons, embedIcon } from "./editorIcons";
 import { codeLanguages, insertEmbed, renderEmbed } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
+import { Outline } from "./outline";
 import { THEMES, applyTheme, type Theme } from "./themes";
 
 type Mode = "rich" | "source";
@@ -58,6 +59,7 @@ interface Pane {
   el: HTMLElement;
   barEl: HTMLElement;
   bodyEl: HTMLElement;
+  outline: Outline;
 }
 
 interface Session {
@@ -302,7 +304,9 @@ function createPane(): Pane {
     panesEl.append(divider);
   }
   panesEl.append(paneEl);
-  const pane: Pane = { docs: [], active: null, el: paneEl, barEl, bodyEl };
+  const outline = new Outline();
+  bodyEl.append(outline.el);
+  const pane: Pane = { docs: [], active: null, el: paneEl, barEl, bodyEl, outline };
   paneEl.addEventListener("mousedown", () => setFocused(pane), true);
   paneEl.addEventListener("focusin", () => setFocused(pane));
   panes.push(pane);
@@ -340,6 +344,14 @@ async function settlePane(pane: Pane) {
 function showActive(pane: Pane) {
   for (const doc of pane.docs) doc.el.hidden = doc !== pane.active;
   if (pane.active?.mode === "source") autosizeSource(pane.active);
+  refreshOutline(pane);
+}
+
+/** The outline follows the pane's visible document; the raw Markdown view has none. */
+function refreshOutline(pane: Pane) {
+  const doc = pane.active;
+  const rich = doc?.mode === "rich";
+  pane.outline.show(rich ? doc.el : null, rich ? doc.editorEl : null);
 }
 
 function activate(doc: Doc) {
@@ -438,6 +450,7 @@ async function mountRich(doc: Doc, markdown: string) {
       if (doc.crepe !== instance || doc.mode !== "rich") return;
       if (md !== doc.baseline) setDirty(doc, true);
       if (focused.active === doc) renderStats();
+      if (doc.pane.active === doc) refreshOutline(doc.pane);
     });
   });
   await instance.create();
@@ -458,6 +471,7 @@ async function setMode(doc: Doc, next: Mode) {
   } else {
     await mountRich(doc, content);
   }
+  refreshOutline(doc.pane);
   render();
 }
 
@@ -485,6 +499,7 @@ async function createDoc(pane: Pane, path: string | null, content: string): Prom
     sourceEl,
   };
 
+  docEl.addEventListener("scroll", () => doc.pane.active === doc && doc.pane.outline.sync(), { passive: true });
   sourceEl.addEventListener("input", () => {
     setDirty(doc, true);
     autosizeSource(doc);
