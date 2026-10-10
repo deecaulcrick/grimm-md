@@ -33,6 +33,7 @@ import { blockEditIcons, embedIcon, toolbarIcons } from "./editorIcons";
 import { codeLanguages, insertEmbed, renderEmbed } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
 import { Outline } from "./outline";
+import { installTableDrag } from "./tableDrag";
 import { taskShortcut } from "./taskShortcut";
 import { THEMES, applyTheme, type Theme } from "./themes";
 
@@ -1167,6 +1168,7 @@ async function restoreSession() {
 async function init() {
   applyTheme(theme);
   document.documentElement.dataset.font = docFont;
+  installTableDrag();
   document.documentElement.dataset.size = docSize;
   document.documentElement.dataset.width = pageWidth;
   if (localStorage.getItem("sidebarCollapsed") === "true") app.classList.add("sidebar-collapsed");
