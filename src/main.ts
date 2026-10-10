@@ -31,7 +31,8 @@ import {
 
 import { blockDrag } from "./blockDrag";
 import { codeTheme } from "./codeTheme";
-import { blockEditIcons, embedIcon, toolbarIcons } from "./editorIcons";
+import { blockEditIcons, embedIcon, imageBlockConfig, tableIcons, toolbarIcons } from "./editorIcons";
+import examplesGuide from "./guides/examples.md?raw";
 import featuresGuide from "./guides/features.md?raw";
 import helpGuide from "./guides/help.md?raw";
 import welcomeGuide from "./guides/welcome.md?raw";
@@ -546,7 +547,9 @@ async function mountRich(doc: Doc, markdown: string) {
         previewToggleText: (previewOnly) => (previewOnly ? "Edit HTML" : "Hide HTML"),
       },
       [Crepe.Feature.Toolbar]: toolbarIcons,
+      [Crepe.Feature.Table]: tableIcons,
       [Crepe.Feature.ImageBlock]: {
+        ...imageBlockConfig,
         onUpload: (file) => uploadImage(doc, file),
         proxyDomURL: (url) => imageUrl(url, doc.path),
       },
@@ -568,7 +571,10 @@ async function mountRich(doc: Doc, markdown: string) {
   instance.on((listener) => {
     listener.markdownUpdated((_ctx, md) => {
       if (doc.crepe !== instance || doc.mode !== "rich") return;
-      if (md !== doc.baseline) setDirty(doc, true);
+      if (md !== doc.baseline) {
+        setDirty(doc, true);
+        scheduleAutosave(doc);
+      }
       if (focused.active === doc) renderStats();
       if (doc.pane.active === doc) refreshOutline(doc.pane);
     });
@@ -647,6 +653,7 @@ async function createDoc(pane: Pane, path: string | null, content: string, title
   docEl.addEventListener("scroll", () => doc.pane.active === doc && doc.pane.outline.sync(), { passive: true });
   sourceEl.addEventListener("input", () => {
     setDirty(doc, true);
+    scheduleAutosave(doc);
     autosizeSource(doc);
     renderStats();
   });
@@ -675,6 +682,7 @@ async function createDoc(pane: Pane, path: string | null, content: string, title
 }
 
 async function closeDoc(doc: Doc, confirm = true): Promise<boolean> {
+  if (confirm) await autosave(doc);
   if (confirm && doc.dirty) {
     activate(doc);
     if (!(await confirmDiscard(`“${docName(doc)}” has unsaved changes. Close it anyway?`, "Close"))) return false;
@@ -736,6 +744,7 @@ const GUIDES = {
   welcome: { title: "Welcome to Grimm", text: welcomeGuide },
   features: { title: "Features", text: featuresGuide },
   help: { title: "Help", text: helpGuide },
+  examples: { title: "Examples", text: examplesGuide },
 };
 
 async function openGuide(id: keyof typeof GUIDES) {
@@ -778,6 +787,43 @@ async function openDialog() {
   for (const p of picked ?? []) await openPath(p);
 }
 
+// ---------- autosave ----------
+
+// A note that lives in a file is written back shortly after the typing stops.
+// New notes have nowhere to go until they are saved once by hand.
+const AUTOSAVE_DELAY = 1200;
+const autosaveTimers = new WeakMap<Doc, number>();
+let autosaveFailed = false;
+
+function scheduleAutosave(doc: Doc) {
+  if (!doc.path || !inTauri) return;
+  window.clearTimeout(autosaveTimers.get(doc));
+  autosaveTimers.set(doc, window.setTimeout(() => autosave(doc), AUTOSAVE_DELAY));
+}
+
+/** Writes a changed note to its file now. Does nothing for a note with no file yet. */
+async function autosave(doc: Doc) {
+  window.clearTimeout(autosaveTimers.get(doc));
+  if (!doc.path || !doc.dirty || !inTauri) return;
+  const contents = getContent(doc);
+  try {
+    await invoke("write_file", { path: doc.path, contents });
+  } catch (err) {
+    // Say so once, not on every keystroke; the dot on the tab stays until a save works.
+    if (!autosaveFailed) toast(`Couldn't save ${docName(doc)}: ${err}`);
+    autosaveFailed = true;
+    return;
+  }
+  autosaveFailed = false;
+  // More was typed while the file was being written: that needs its own save.
+  if (getContent(doc) !== contents) return scheduleAutosave(doc);
+  if (doc.mode === "rich" && doc.crepe) doc.baseline = doc.crepe.getMarkdown();
+  setDirty(doc, false);
+}
+
+// Leaving the window is a good moment to make sure everything is on disk.
+window.addEventListener("blur", () => allDocs().forEach(autosave));
+
 async function saveDocument(doc: Doc | null, saveAs = false) {
   if (!doc) return;
   if (!inTauri) return toast("Saving needs the desktop app");
@@ -796,6 +842,7 @@ async function saveDocument(doc: Doc | null, saveAs = false) {
     toast(`Couldn't save: ${err}`);
     return;
   }
+  window.clearTimeout(autosaveTimers.get(doc));
   doc.path = target;
   doc.title = null;
   doc.dirty = false;
@@ -1157,6 +1204,7 @@ const commands: Record<string, () => unknown> = {
   welcome: () => openGuide("welcome"),
   features: () => openGuide("features"),
   help: () => openGuide("help"),
+  examples: () => openGuide("examples"),
 };
 
 // A shortcut can arrive both as a keydown and as a native menu event; the
@@ -1282,13 +1330,24 @@ async function init() {
   });
 
   await getCurrentWindow().onCloseRequested(async (event) => {
+    // Write what can be written first; only notes that have never been given a
+    // file can still be unsaved after that. Nothing is awaited unless there is
+    // something to write, so an ordinary quit is not held up.
+    const pendingSaves = allDocs().filter((d) => d.dirty && d.path);
+    if (pendingSaves.length) {
+      event.preventDefault();
+      await Promise.all(pendingSaves.map(autosave));
+    }
     const unsaved = allDocs().filter((d) => d.dirty).length;
-    if (!unsaved) return;
-    const text =
-      unsaved === 1
-        ? "A document has unsaved changes. Quit anyway?"
-        : `${unsaved} documents have unsaved changes. Quit anyway?`;
-    if (!(await confirmDiscard(text, "Quit"))) event.preventDefault();
+    if (unsaved) {
+      const text =
+        unsaved === 1
+          ? "A document has unsaved changes. Quit anyway?"
+          : `${unsaved} documents have unsaved changes. Quit anyway?`;
+      if (!(await confirmDiscard(text, "Quit"))) return event.preventDefault();
+    }
+    // The close was held back for the saves above, so finish it by hand.
+    if (pendingSaves.length) await getCurrentWindow().destroy();
   });
 
   const pending = await invoke<string | null>("take_pending_file");

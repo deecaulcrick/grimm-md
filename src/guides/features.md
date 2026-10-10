@@ -1,6 +1,6 @@
 # Features
 
-Everything Grimm can do, in one place. Reopen this list any time from the **Help** menu at the top of the screen.
+Everything Grimm can do, in one place. Reopen this list any time from the **Help** menu at the top of the screen. To see each kind of block on the page, open **Examples** from the same menu.
 
 ## Writing
 
@@ -48,7 +48,7 @@ Everything Grimm can do, in one place. Reopen this list any time from the **Help
 - **Source view.** Press ⌘/ to edit the raw Markdown directly.
 - **Front matter is preserved.** YAML at the top of a file is kept as it is.
 - **Opens from Finder.** Double-click a Markdown file, or drop one on the window.
-- **Unsaved changes are flagged** with a dot on the tab, and Grimm asks before closing them.
+- **Autosave.** Once a note has a file, changes are saved a moment after you stop typing, when you close the tab, and when you leave the app. A dot on the tab marks anything not yet written.
 
 ## The app
 

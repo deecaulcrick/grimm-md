@@ -280,6 +280,7 @@ fn build_menu(
         .separator()
         .text("welcome", "Welcome to Grimm")
         .text("features", "Features")
+        .text("examples", "Examples")
         .build()?;
 
     let menu = MenuBuilder::new(app)

@@ -27,6 +27,8 @@ window.addEventListener("message", (event) => {
   for (const frame of document.querySelectorAll<HTMLIFrameElement>("iframe.html-embed")) {
     if (frame.contentWindow !== event.source) continue;
     frame.style.height = `${Math.min(Math.max(height, 24), MAX_HEIGHT)}px`;
+    // A replacement frame has now laid itself out: it can take over from the one it replaces.
+    if (frame.classList.contains("pending")) settle(frame);
   }
 });
 
@@ -68,12 +70,60 @@ function fillSlots() {
 
 new MutationObserver(fillSlots).observe(document.body, { childList: true, subtree: true });
 
+/** Shows a frame that was loading behind the one on screen, and drops the old one. */
+function settle(frame: HTMLIFrameElement) {
+  frame.classList.remove("pending");
+  for (const other of frame.parentElement?.querySelectorAll("iframe.html-embed") ?? []) {
+    if (other !== frame) other.remove();
+  }
+}
+
+// While an embed's HTML is being typed, its preview is refreshed in place: the
+// new page loads out of sight and is swapped in once it is ready, so the
+// preview neither blanks nor jumps in height on every keystroke.
+const REFRESH_DELAY = 280;
+const refreshTimers = new Map<string, number>();
+
+function refresh(id: string) {
+  const slot = document.querySelector<HTMLElement>(`.${SLOT_CLASS}[data-embed="${id}"]`);
+  const content = slots.get(id);
+  if (!slot || content === undefined) return;
+  for (const stale of slot.querySelectorAll("iframe.pending")) stale.remove();
+  const frame = buildFrame(content);
+  frame.classList.add("pending");
+  slot.append(frame);
+  // If the page never reports in, show it anyway.
+  window.setTimeout(() => frame.isConnected && frame.classList.contains("pending") && settle(frame), 1500);
+}
+
 export function renderEmbed(language: string, content: string): string | null {
   if (language.toLowerCase() !== EMBED_LANGUAGE || !content.trim()) return null;
+  // The block being typed in keeps its slot, so the editor sees an unchanged preview and leaves it alone.
+  const editing = document.activeElement?.closest(".milkdown-code-block")?.querySelector<HTMLElement>(`.${SLOT_CLASS}`);
+  const current = editing?.dataset.embed;
+  if (current !== undefined && slots.has(current)) {
+    slots.set(current, content);
+    window.clearTimeout(refreshTimers.get(current));
+    refreshTimers.set(current, window.setTimeout(() => refresh(current), REFRESH_DELAY));
+    return `<div class="${SLOT_CLASS}" data-embed="${current}"></div>`;
+  }
   const id = String(nextSlot++);
   slots.set(id, content);
   if (slots.size > MAX_SLOTS) slots.delete(slots.keys().next().value!);
+  const typing = document.activeElement?.closest<HTMLElement>(".milkdown-code-block");
+  if (typing) queueMicrotask(() => keepEditing(typing));
   return `<div class="${SLOT_CLASS}" data-embed="${id}"></div>`;
+}
+
+/**
+ * Embeds show only their result by default, which is right for a note being
+ * read. But an embed gets its first preview on the first character typed into
+ * it, and hiding the code at that moment would take the editor away mid-word.
+ */
+function keepEditing(block: HTMLElement) {
+  if (!block.querySelector(".codemirror-host.hidden")) return;
+  block.querySelector<HTMLButtonElement>(".preview-toggle-button")?.click();
+  queueMicrotask(() => block.querySelector<HTMLElement>(".cm-content")?.focus());
 }
 
 export function insertEmbed(ctx: Ctx) {

@@ -69,8 +69,9 @@ function attach(view: EditorView) {
   const isGrip = (target: EventTarget | null) =>
     target instanceof Element && !!target.closest(".milkdown-block-handle .operation-item:last-child");
 
+  // Image blocks are natively draggable too, which would hijack a pull on their resize bar.
   const onDragStart = (e: DragEvent) => {
-    if (!(e.target instanceof Element) || !e.target.closest(".milkdown-block-handle")) return;
+    if (!(e.target instanceof Element) || !e.target.closest(".milkdown-block-handle, .milkdown-image-block")) return;
     e.preventDefault();
     e.stopPropagation();
   };

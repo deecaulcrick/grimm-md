@@ -2,18 +2,21 @@
 
 Short answers to the things people ask first. This page is always one click away: use the **Help** button at the bottom of the sidebar, or the **Help** menu at the top of the screen.
 
-Two other notes come with Grimm, both in the **Help** menu:
+Three other notes come with Grimm, all in the **Help** menu:
 
 - **Welcome to Grimm** is a five-minute tour.
 - **Features** lists everything the app can do.
+- **Examples** shows every kind of block, rendered, for you to poke at.
 
 ## Files
 
-**Where are my notes kept?** Wherever you save them. Grimm edits ordinary `.md` files and keeps no library of its own. A new note lives only in its tab until you save it with ⌘S.
+**Where are my notes kept?** Wherever you save them. Grimm edits ordinary `.md` files and keeps no library of its own.
+
+**Do I need to save?** Only once. A new note lives in its tab until you save it with ⌘S and choose where it goes. From then on Grimm saves it for you a moment after you stop typing, and again when you close it or switch away from the app.
 
 **How do I work with a whole folder?** Press ⇧⌘O and pick it. Its Markdown files appear in the sidebar, including those in subfolders. Close the folder with the × beside its name.
 
-**How do I know a note is unsaved?** Its tab shows a dot, and the status bar says *Edited*. Grimm asks before closing a note with unsaved changes.
+**How do I know a note is unsaved?** Its tab shows a dot, and the status bar says *Edited*. For a note that has a file, the dot clears by itself within a second or two. Grimm asks before closing a new note that has never been saved.
 
 **Where do uploaded images go?** Into a folder called `assets`, next to the note. The note links to them by a relative path, so keep the folder with the note when you move it. A new note has to be saved before a picture can be uploaded into it, and Grimm asks you to do that first.
 

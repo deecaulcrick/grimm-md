@@ -1,6 +1,8 @@
 import {
   AppWindow,
   Bold,
+  Captions,
+  GripHorizontal,
   Code,
   GripVertical,
   Heading1,
@@ -18,6 +20,10 @@ import {
   Minus,
   Plus,
   Strikethrough,
+  TextAlignCenter,
+  TextAlignEnd,
+  TextAlignStart,
+  Trash,
   Table,
   TextQuote,
   Type,
@@ -62,6 +68,29 @@ export const toolbarIcons = {
   strikethroughIcon: svg(Strikethrough),
   codeIcon: svg(Code),
   linkIcon: svg(Link),
+};
+
+/** Lucide replacements for the table's handles and its row and column menus. */
+export const tableIcons = {
+  addRowIcon: svg(Plus),
+  addColIcon: svg(Plus),
+  deleteRowIcon: svg(Trash),
+  deleteColIcon: svg(Trash),
+  alignLeftIcon: svg(TextAlignStart),
+  alignCenterIcon: svg(TextAlignCenter),
+  alignRightIcon: svg(TextAlignEnd),
+  colDragHandleIcon: svg(GripHorizontal),
+  rowDragHandleIcon: svg(GripVertical),
+};
+
+/** Icons and wording for the image block: its empty "add an image" card and the caption button. */
+export const imageBlockConfig = {
+  blockImageIcon: svg(Image),
+  blockCaptionIcon: svg(Captions),
+  blockUploadButton: "Upload",
+  blockUploadPlaceholderText: "or paste an image link",
+  blockConfirmButton: "Embed",
+  blockCaptionPlaceholderText: "Write a caption…",
 };
 
 export const embedIcon = svg(AppWindow);

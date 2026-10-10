@@ -43,11 +43,13 @@ Hover any block and a grip appears to its left. Drag it to move the block somewh
 | --- | --- |
 | Open a file | ⌘O |
 | Open a folder in the sidebar | ⇧⌘O |
-| Save, or Save As | ⌘S, ⇧⌘S |
+| Save a new note, or Save As | ⌘S, ⇧⌘S |
 | New tab, close tab | ⌘N, ⌘W |
 | Next or previous tab | ⇧⌘], ⇧⌘[ |
 | Split the window in two | ⇧⌘\ |
 | Show or hide the sidebar | ⌘\ |
+
+Save a new note once to give it a home. After that Grimm saves it for you as you write.
 
 Drag a file from the sidebar onto either side of a split to open it there, or ⌘-click it to open it in the other pane. Grimm reopens your tabs the next time you launch it.
 
