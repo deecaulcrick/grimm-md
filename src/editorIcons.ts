@@ -1,5 +1,6 @@
 import {
   AppWindow,
+  Bold,
   Code,
   GripVertical,
   Heading1,
@@ -9,11 +10,14 @@ import {
   Heading5,
   Heading6,
   Image,
+  Italic,
+  Link,
   List,
   ListOrdered,
   ListTodo,
   Minus,
   Plus,
+  Strikethrough,
   Table,
   TextQuote,
   Type,
@@ -49,6 +53,15 @@ export const blockEditIcons = {
     codeBlock: { icon: svg(Code) },
     table: { icon: svg(Table) },
   },
+};
+
+/** Lucide replacements for the selection toolbar icons. */
+export const toolbarIcons = {
+  boldIcon: svg(Bold),
+  italicIcon: svg(Italic),
+  strikethroughIcon: svg(Strikethrough),
+  codeIcon: svg(Code),
+  linkIcon: svg(Link),
 };
 
 export const embedIcon = svg(AppWindow);

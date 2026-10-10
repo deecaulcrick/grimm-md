@@ -6,6 +6,8 @@
  */
 const HEADINGS = "h1, h2, h3, h4, h5, h6";
 const MIN_HEADINGS = 2;
+// Only headings in the text itself: the editor's menus use heading tags for their group titles.
+const isDocHeading = (h: HTMLElement) => !!h.closest(".ProseMirror") && !h.closest("pre, table");
 // How far below the top of the view a heading can be and still count as "current".
 const ACTIVE_OFFSET = 96;
 
@@ -31,7 +33,7 @@ export class Outline {
   /** Rebuilds the outline for a document; pass null to hide it. */
   show(scroller: HTMLElement | null, content: HTMLElement | null) {
     this.scroller = scroller;
-    this.headings = scroller && content ? [...content.querySelectorAll<HTMLElement>(HEADINGS)].filter((h) => !h.closest("pre, table")) : [];
+    this.headings = scroller && content ? [...content.querySelectorAll<HTMLElement>(HEADINGS)].filter(isDocHeading) : [];
     this.el.hidden = this.headings.length < MIN_HEADINGS;
     if (this.el.hidden) return void this.lines.replaceChildren();
 

@@ -143,8 +143,9 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .item(&item("close-tab", "Close Tab", "CmdOrCtrl+W")?)
         .build()?;
     let edit = SubmenuBuilder::new(app, "Edit")
-        .undo()
-        .redo()
+        // Not the native items: those only undo typing, not edits the editor makes itself.
+        .item(&item("undo", "Undo", "CmdOrCtrl+Z")?)
+        .item(&item("redo", "Redo", "CmdOrCtrl+Shift+Z")?)
         .separator()
         .cut()
         .copy()

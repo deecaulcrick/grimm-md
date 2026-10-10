@@ -1,5 +1,6 @@
 import { Crepe } from "@milkdown/crepe";
-import { remarkStringifyOptionsCtx } from "@milkdown/kit/core";
+import { editorViewCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
+import { redo, undo } from "@milkdown/kit/prose/history";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 import "./styles.css";
@@ -26,15 +27,18 @@ import {
   type IconNode,
 } from "lucide";
 
+import { blockDrag } from "./blockDrag";
 import { codeTheme } from "./codeTheme";
-import { blockEditIcons, embedIcon } from "./editorIcons";
+import { blockEditIcons, embedIcon, toolbarIcons } from "./editorIcons";
 import { codeLanguages, insertEmbed, renderEmbed } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
 import { Outline } from "./outline";
+import { taskShortcut } from "./taskShortcut";
 import { THEMES, applyTheme, type Theme } from "./themes";
 
 type Mode = "rich" | "source";
-type DocFont = "serif" | "sans";
+type DocFont = "serif" | "sans" | "mono";
+type PageWidth = "centered" | "full";
 
 interface Doc {
   path: string | null;
@@ -92,7 +96,9 @@ let theme: Theme =
   THEMES.find((t) => t.id === localStorage.getItem("theme")) ??
   THEMES.find((t) => t.scheme === (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"))!;
 
-let docFont: DocFont = localStorage.getItem("font") === "sans" ? "sans" : "serif";
+const DOC_FONTS: DocFont[] = ["serif", "sans", "mono"];
+let docFont: DocFont = DOC_FONTS.find((f) => f === localStorage.getItem("font")) ?? "serif";
+let pageWidth: PageWidth = localStorage.getItem("pageWidth") === "full" ? "full" : "centered";
 
 // ---------- helpers ----------
 
@@ -161,7 +167,8 @@ function renderBar(pane: Pane) {
       closeDoc(doc);
     });
     tab.append(name, close);
-    tab.addEventListener("click", () => activate(doc));
+    tab.addEventListener("click", () => tabDragged || activate(doc));
+    tab.addEventListener("pointerdown", (e) => startTabDrag(e, doc, tab));
     tab.addEventListener("auxclick", (e) => e.button === 1 && closeDoc(doc));
     tabs.append(tab);
   }
@@ -327,10 +334,10 @@ function detach(doc: Doc) {
   if (pane.active === doc) pane.active = pane.docs[Math.min(index, pane.docs.length - 1)] ?? null;
 }
 
-function attach(doc: Doc, pane: Pane) {
+function attach(doc: Doc, pane: Pane, index = pane.docs.length) {
   doc.pane = pane;
   doc.el.hidden = true;
-  pane.docs.push(doc);
+  pane.docs.splice(index, 0, doc);
   pane.bodyEl.append(doc.el);
 }
 
@@ -361,11 +368,104 @@ function activate(doc: Doc) {
   render();
 }
 
-async function moveDoc(doc: Doc, target: Pane) {
+async function moveDoc(doc: Doc, target: Pane, index?: number) {
   const source = doc.pane;
   detach(doc);
-  attach(doc, target);
+  attach(doc, target, index);
   await settlePane(source);
+  activate(doc);
+}
+
+// ---------- tab dragging ----------
+
+const TAB_DRAG_THRESHOLD = 5;
+const tabDropEl = el("div", "tab-drop");
+// Set while a press on a tab turned into a drag, so the click that ends it is ignored.
+let tabDragged = false;
+
+/** Where a tab dragged to this point would land: a slot in a tab bar, or the end of another pane. */
+function tabDropTarget(doc: Doc, x: number, y: number): { pane: Pane; index: number } | null {
+  const pane = panes.find((p) => {
+    const r = p.el.getBoundingClientRect();
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+  });
+  if (!pane) return null;
+  if (y >= pane.barEl.getBoundingClientRect().bottom) {
+    return pane === doc.pane ? null : { pane, index: pane.docs.length };
+  }
+  const tabs = [...pane.barEl.querySelectorAll<HTMLElement>(".tab")];
+  const index = tabs.filter((tab) => {
+    const r = tab.getBoundingClientRect();
+    return x > r.left + r.width / 2;
+  }).length;
+  return { pane, index };
+}
+
+function showTabDrop(target: { pane: Pane; index: number } | null, from?: Pane) {
+  for (const pane of panes) pane.el.classList.remove("drop-target");
+  tabDropEl.hidden = true;
+  if (!target) return;
+  const tabs = [...target.pane.barEl.querySelectorAll<HTMLElement>(".tab")];
+  const edge = tabs[target.index]?.getBoundingClientRect().left ?? tabs[tabs.length - 1]?.getBoundingClientRect().right;
+  if (edge === undefined) return;
+  const bar = tabs[0].getBoundingClientRect();
+  tabDropEl.style.left = `${Math.round(edge) - 2}px`;
+  tabDropEl.style.top = `${bar.top}px`;
+  tabDropEl.style.height = `${bar.height}px`;
+  tabDropEl.hidden = false;
+  if (target.pane !== from) target.pane.el.classList.add("drop-target");
+}
+
+function startTabDrag(down: PointerEvent, doc: Doc, tab: HTMLElement) {
+  tabDragged = false;
+  if (down.button !== 0 || (down.target as HTMLElement).closest(".tab-close")) return;
+  let target: { pane: Pane; index: number } | null = null;
+
+  const move = (e: PointerEvent) => {
+    if (!tabDragged) {
+      if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < TAB_DRAG_THRESHOLD) return;
+      tabDragged = true;
+      tab.classList.add("dragging");
+      document.body.classList.add("dragging-tab");
+      document.body.append(tabDropEl);
+    }
+    target = tabDropTarget(doc, e.clientX, e.clientY);
+    showTabDrop(target, doc.pane);
+  };
+  const stop = (drop: boolean) => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
+    window.removeEventListener("keydown", key, true);
+    if (!tabDragged) return;
+    tab.classList.remove("dragging");
+    document.body.classList.remove("dragging-tab");
+    showTabDrop(null);
+    tabDropEl.remove();
+    if (drop && target) dropTab(doc, target.pane, target.index);
+  };
+  const up = () => stop(true);
+  const cancel = () => stop(false);
+  const key = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    stop(false);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", cancel);
+  window.addEventListener("keydown", key, true);
+}
+
+function dropTab(doc: Doc, pane: Pane, index: number) {
+  if (pane !== doc.pane) return void moveDoc(doc, pane, index);
+  const from = pane.docs.indexOf(doc);
+  const to = index > from ? index - 1 : index;
+  if (to !== from) {
+    pane.docs.splice(from, 1);
+    pane.docs.splice(to, 0, doc);
+  }
   activate(doc);
 }
 
@@ -433,6 +533,7 @@ async function mountRich(doc: Doc, markdown: string) {
         previewOnlyByDefault: true,
         previewToggleText: (previewOnly) => (previewOnly ? "Edit HTML" : "Hide HTML"),
       },
+      [Crepe.Feature.Toolbar]: toolbarIcons,
       [Crepe.Feature.BlockEdit]: {
         ...blockEditIcons,
         buildMenu: (builder) => {
@@ -444,7 +545,7 @@ async function mountRich(doc: Doc, markdown: string) {
   instance.editor.config((ctx) => {
     ctx.update(remarkStringifyOptionsCtx, (options) => ({ ...options, bullet: "-" as const, rule: "-" as const }));
   });
-  instance.editor.use(linkCards);
+  instance.editor.use(linkCards).use(taskShortcut).use(blockDrag);
   instance.on((listener) => {
     listener.markdownUpdated((_ctx, md) => {
       if (doc.crepe !== instance || doc.mode !== "rich") return;
@@ -555,9 +656,12 @@ function rememberRecent(p: string) {
   localStorage.setItem("recents", JSON.stringify(recents));
 }
 
-async function openPath(p: string, { otherPane = false, quiet = false } = {}) {
+async function openPath(
+  p: string,
+  { otherPane = false, quiet = false, pane: into }: { otherPane?: boolean; quiet?: boolean; pane?: Pane } = {},
+) {
   const existing = allDocs().find((d) => d.path === p);
-  if (existing) return activate(existing);
+  if (existing) return into && existing.pane !== into ? moveDoc(existing, into) : activate(existing);
 
   let text: string;
   try {
@@ -570,8 +674,8 @@ async function openPath(p: string, { otherPane = false, quiet = false } = {}) {
     return;
   }
 
-  let pane = focused;
-  if (otherPane) pane = panes.find((candidate) => candidate !== focused) ?? createPane();
+  let pane = into && panes.includes(into) ? into : focused;
+  if (!into && otherPane) pane = panes.find((candidate) => candidate !== focused) ?? createPane();
   // An untouched "Untitled" tab is replaced rather than left behind.
   const placeholder = pane.active && isPristine(pane.active) ? pane.active : null;
   await createDoc(pane, p, text);
@@ -656,8 +760,65 @@ function fileItem(p: string, detail: string, openPaths: Set<string>): HTMLLIElem
     dir.textContent = `‎${detail}`;
     li.append(dir);
   }
-  li.addEventListener("click", (e) => openPath(p, { otherPane: e.metaKey || e.ctrlKey }));
+  li.addEventListener("click", (e) => fileDragged || openPath(p, { otherPane: e.metaKey || e.ctrlKey }));
+  li.addEventListener("pointerdown", (e) => startFileDrag(e, p));
   return li;
+}
+
+// Set while a press on a file turned into a drag, so the click that ends it is ignored.
+let fileDragged = false;
+
+/** Dragging a file out of the sidebar opens it in the pane it is dropped on. */
+function startFileDrag(down: PointerEvent, path: string) {
+  fileDragged = false;
+  if (down.button !== 0) return;
+  const ghost = el("div", "drag-ghost");
+  ghost.textContent = basename(path);
+  let target: Pane | null = null;
+
+  const mark = (pane: Pane | null) => {
+    target = pane;
+    for (const p of panes) p.el.classList.toggle("drop-target", p === pane);
+  };
+  const move = (e: PointerEvent) => {
+    if (!fileDragged) {
+      if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < TAB_DRAG_THRESHOLD) return;
+      fileDragged = true;
+      document.body.classList.add("dragging-tab");
+      document.body.append(ghost);
+    }
+    ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 14}px)`;
+    mark(
+      panes.find((p) => {
+        const r = p.el.getBoundingClientRect();
+        return e.clientX >= r.left && e.clientX < r.right && e.clientY >= r.top && e.clientY < r.bottom;
+      }) ?? null,
+    );
+  };
+  const stop = (drop: boolean) => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
+    window.removeEventListener("keydown", key, true);
+    if (!fileDragged) return;
+    const pane = target;
+    mark(null);
+    document.body.classList.remove("dragging-tab");
+    ghost.remove();
+    if (drop && pane) openPath(path, { pane });
+  };
+  const up = () => stop(true);
+  const cancel = () => stop(false);
+  const key = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    stop(false);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", cancel);
+  window.addEventListener("keydown", key, true);
 }
 
 function renderSidebar() {
@@ -692,7 +853,15 @@ function toggleSidebar() {
 
 function setTheme(next: Theme) {
   theme = next;
-  applyTheme(next);
+  // Cross-fades the whole UI to the new colours where the webview supports it.
+  if (document.startViewTransition) {
+    // The theme is applied even when the animation itself gets skipped.
+    const transition = document.startViewTransition(() => applyTheme(next));
+    transition.ready.catch(() => {});
+    transition.finished.catch(() => {});
+  } else {
+    applyTheme(next);
+  }
   localStorage.setItem("theme", next.id);
 }
 
@@ -700,6 +869,16 @@ function setDocFont(next: DocFont) {
   docFont = next;
   document.documentElement.dataset.font = next;
   localStorage.setItem("font", next);
+}
+
+function setPageWidth(next: PageWidth) {
+  pageWidth = next;
+  document.documentElement.dataset.width = next;
+  localStorage.setItem("pageWidth", next);
+  for (const pane of panes) {
+    if (pane.active?.mode === "source") autosizeSource(pane.active);
+    pane.outline.sync();
+  }
 }
 
 function renderAppearance() {
@@ -731,7 +910,7 @@ function renderAppearance() {
   }
 
   const fonts = el("div", "font-toggle");
-  for (const [id, text] of [["serif", "Serif"], ["sans", "Sans"]] as const) {
+  for (const [id, text] of [["serif", "Serif"], ["sans", "Sans"], ["mono", "Mono"]] as const) {
     const button = el("button", id);
     button.textContent = text;
     button.classList.toggle("selected", id === docFont);
@@ -742,7 +921,19 @@ function renderAppearance() {
     fonts.append(button);
   }
 
-  appearanceMenu.replaceChildren(label("Theme"), grid, label("Font"), fonts);
+  const widths = el("div", "font-toggle");
+  for (const [id, text] of [["centered", "Centered"], ["full", "Full width"]] as const) {
+    const button = el("button");
+    button.textContent = text;
+    button.classList.toggle("selected", id === pageWidth);
+    button.addEventListener("click", () => {
+      setPageWidth(id);
+      renderAppearance();
+    });
+    widths.append(button);
+  }
+
+  appearanceMenu.replaceChildren(label("Theme"), grid, label("Font"), fonts, label("Page width"), widths);
 }
 
 function toggleAppearance(anchor: HTMLElement) {
@@ -804,7 +995,46 @@ function cycleTab(step: number) {
   activate(docs[(docs.indexOf(active) + step + docs.length) % docs.length]);
 }
 
+// Undo and redo are routed by hand: a block move can leave the caret outside
+// the editor, and the menu bar's own items only know about typed text.
+let lastHistoryAt = 0;
+
+function runHistory(action: "undo" | "redo") {
+  const now = performance.now();
+  // The same press can arrive as a keydown and again as a menu event.
+  if (now - lastHistoryAt < 100) return;
+  lastHistoryAt = now;
+  const target = document.activeElement;
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+    return void document.execCommand(action);
+  }
+  if (target instanceof HTMLElement && target.closest(".cm-editor")) {
+    // Code blocks keep their own history, bound to this key.
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+    const init = { key: "z", code: "KeyZ", keyCode: 90, metaKey: mac, ctrlKey: !mac, shiftKey: action === "redo" };
+    return void target.dispatchEvent(new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true }));
+  }
+  const doc = focused.active;
+  if (doc?.mode !== "rich" || !doc.crepe) return;
+  doc.crepe.editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx);
+    (action === "undo" ? undo : redo)(view.state, view.dispatch);
+    view.focus();
+  });
+}
+
+window.addEventListener("keydown", (e) => {
+  if (!e.isTrusted || e.code !== "KeyZ" || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+  const field = e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement;
+  // An editor or text field that had the caret has already dealt with it.
+  if (e.defaultPrevented || field) return void (lastHistoryAt = performance.now());
+  e.preventDefault();
+  runHistory(e.shiftKey ? "redo" : "undo");
+});
+
 const commands: Record<string, () => unknown> = {
+  undo: () => runHistory("undo"),
+  redo: () => runHistory("redo"),
   new: () => newDocument(),
   open: openDialog,
   "open-folder": openFolderDialog,
@@ -827,7 +1057,8 @@ let lastCommand = "";
 let lastCommandAt = 0;
 function run(id: string) {
   const now = performance.now();
-  if (id === lastCommand && now - lastCommandAt < 250) return;
+  const repeatable = id === "undo" || id === "redo";
+  if (!repeatable && id === lastCommand && now - lastCommandAt < 250) return;
   lastCommand = id;
   lastCommandAt = now;
   commands[id]?.();
@@ -911,6 +1142,7 @@ async function restoreSession() {
 async function init() {
   applyTheme(theme);
   document.documentElement.dataset.font = docFont;
+  document.documentElement.dataset.width = pageWidth;
   if (localStorage.getItem("sidebarCollapsed") === "true") app.classList.add("sidebar-collapsed");
   setSidebarWidth(Number(localStorage.getItem("sidebarWidth")) || SIDEBAR_DEFAULT);
   setSplitRatio(Number(localStorage.getItem("splitRatio")) || 0.5);
