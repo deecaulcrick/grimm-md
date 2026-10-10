@@ -30,18 +30,28 @@
   --mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
   --bar-h: 46px;
   --doc-font: var(--serif);
-  --doc-size: 16.5px;
+  --doc-base: 16.5px;
+  --doc-scale: 1;
+  --doc-size: calc(var(--doc-base) * var(--doc-scale));
   color-scheme: light;
 }
 
 :root[data-font="sans"] {
   --doc-font: var(--sans);
-  --doc-size: 15.5px;
+  --doc-base: 15.5px;
 }
 
 :root[data-font="mono"] {
   --doc-font: var(--mono);
-  --doc-size: 14.5px;
+  --doc-base: 14.5px;
+}
+
+:root[data-size="small"] {
+  --doc-scale: 0.9;
+}
+
+:root[data-size="large"] {
+  --doc-scale: 1.15;
 }
 
 :root[data-scheme="dark"] {
@@ -615,7 +625,7 @@ body.dragging-tab .toc {
   background: transparent;
   color: var(--text);
   font-family: var(--mono);
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--doc-scale));
   line-height: 1.7;
   tab-size: 2;
   overflow: hidden;
@@ -851,6 +861,15 @@ body.resizing .toc {
   padding: 0 0 0 18px;
   border-left: 3px solid var(--accent);
   color: var(--text-2);
+}
+
+/* Without this the last line's spacing hangs below the text and the bar looks bottom-heavy. */
+.editor .milkdown .ProseMirror blockquote > :first-child {
+  margin-top: 0;
+}
+
+.editor .milkdown .ProseMirror blockquote > :last-child {
+  margin-bottom: 0;
 }
 
 .editor .milkdown .ProseMirror blockquote::before {

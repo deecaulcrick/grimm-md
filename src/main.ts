@@ -39,6 +39,7 @@ import { THEMES, applyTheme, type Theme } from "./themes";
 type Mode = "rich" | "source";
 type DocFont = "serif" | "sans" | "mono";
 type PageWidth = "centered" | "full";
+type DocSize = "small" | "normal" | "large";
 
 interface Doc {
   path: string | null;
@@ -98,6 +99,8 @@ let theme: Theme =
 
 const DOC_FONTS: DocFont[] = ["serif", "sans", "mono"];
 let docFont: DocFont = DOC_FONTS.find((f) => f === localStorage.getItem("font")) ?? "serif";
+const DOC_SIZES: DocSize[] = ["small", "normal", "large"];
+let docSize: DocSize = DOC_SIZES.find((size) => size === localStorage.getItem("fontSize")) ?? "normal";
 let pageWidth: PageWidth = localStorage.getItem("pageWidth") === "full" ? "full" : "centered";
 
 // ---------- helpers ----------
@@ -871,6 +874,16 @@ function setDocFont(next: DocFont) {
   localStorage.setItem("font", next);
 }
 
+function setDocSize(next: DocSize) {
+  docSize = next;
+  document.documentElement.dataset.size = next;
+  localStorage.setItem("fontSize", next);
+  for (const pane of panes) {
+    if (pane.active?.mode === "source") autosizeSource(pane.active);
+    pane.outline.sync();
+  }
+}
+
 function setPageWidth(next: PageWidth) {
   pageWidth = next;
   document.documentElement.dataset.width = next;
@@ -921,6 +934,18 @@ function renderAppearance() {
     fonts.append(button);
   }
 
+  const sizes = el("div", "font-toggle");
+  for (const [id, text] of [["small", "Small"], ["normal", "Normal"], ["large", "Large"]] as const) {
+    const button = el("button");
+    button.textContent = text;
+    button.classList.toggle("selected", id === docSize);
+    button.addEventListener("click", () => {
+      setDocSize(id);
+      renderAppearance();
+    });
+    sizes.append(button);
+  }
+
   const widths = el("div", "font-toggle");
   for (const [id, text] of [["centered", "Centered"], ["full", "Full width"]] as const) {
     const button = el("button");
@@ -933,7 +958,7 @@ function renderAppearance() {
     widths.append(button);
   }
 
-  appearanceMenu.replaceChildren(label("Theme"), grid, label("Font"), fonts, label("Page width"), widths);
+  appearanceMenu.replaceChildren(label("Theme"), grid, label("Font"), fonts, label("Text size"), sizes, label("Page width"), widths);
 }
 
 function toggleAppearance(anchor: HTMLElement) {
@@ -1142,6 +1167,7 @@ async function restoreSession() {
 async function init() {
   applyTheme(theme);
   document.documentElement.dataset.font = docFont;
+  document.documentElement.dataset.size = docSize;
   document.documentElement.dataset.width = pageWidth;
   if (localStorage.getItem("sidebarCollapsed") === "true") app.classList.add("sidebar-collapsed");
   setSidebarWidth(Number(localStorage.getItem("sidebarWidth")) || SIDEBAR_DEFAULT);
