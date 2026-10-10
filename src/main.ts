@@ -35,6 +35,7 @@ import { blockEditIcons, embedIcon, toolbarIcons } from "./editorIcons";
 import featuresGuide from "./guides/features.md?raw";
 import helpGuide from "./guides/help.md?raw";
 import welcomeGuide from "./guides/welcome.md?raw";
+import { imageTitles, imageUrl, saveImage } from "./images";
 import { codeLanguages, insertEmbed, renderEmbed } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
 import { Outline } from "./outline";
@@ -545,6 +546,10 @@ async function mountRich(doc: Doc, markdown: string) {
         previewToggleText: (previewOnly) => (previewOnly ? "Edit HTML" : "Hide HTML"),
       },
       [Crepe.Feature.Toolbar]: toolbarIcons,
+      [Crepe.Feature.ImageBlock]: {
+        onUpload: (file) => uploadImage(doc, file),
+        proxyDomURL: (url) => imageUrl(url, doc.path),
+      },
       [Crepe.Feature.BlockEdit]: {
         ...blockEditIcons,
         buildMenu: (builder) => {
@@ -559,7 +564,7 @@ async function mountRich(doc: Doc, markdown: string) {
     // or "Sidebar" cannot collide with the app's own element of that id.
     ctx.update(headingIdGenerator.key, (slug) => (node) => `h-${slug(node)}`);
   });
-  instance.editor.use(linkCards).use(taskShortcut).use(blockDrag);
+  instance.editor.use(linkCards).use(taskShortcut).use(blockDrag).use(imageTitles);
   instance.on((listener) => {
     listener.markdownUpdated((_ctx, md) => {
       if (doc.crepe !== instance || doc.mode !== "rich") return;
@@ -571,6 +576,30 @@ async function mountRich(doc: Doc, markdown: string) {
   await instance.create();
   doc.crepe = instance;
   doc.baseline = instance.getMarkdown();
+}
+
+/**
+ * Stores a picked image beside the note and returns the relative path that goes
+ * into the Markdown. An empty result leaves the image block as it was.
+ */
+async function uploadImage(doc: Doc, file: File): Promise<string> {
+  // In a plain browser there is no disk to write to; the picture lasts for the session.
+  if (!inTauri) return URL.createObjectURL(file);
+  // The path is relative to the note, so the note needs a place on disk first.
+  if (!doc.path) {
+    toast("Save this note first: its images are kept in a folder beside it", 6000);
+    await saveDocument(doc);
+    if (!doc.path) {
+      toast("Image not added, the note has to be saved first");
+      return "";
+    }
+  }
+  try {
+    return await saveImage(file, doc.path);
+  } catch (err) {
+    toast(`Couldn't add the image: ${err}`);
+    return "";
+  }
 }
 
 async function setMode(doc: Doc, next: Mode) {

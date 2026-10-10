@@ -1,4 +1,10 @@
-use std::{fs, path::Path, sync::Mutex, time::Duration};
+use std::{
+    fs,
+    io::{ErrorKind, Write},
+    path::Path,
+    sync::Mutex,
+    time::Duration,
+};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
     Emitter, Manager,
@@ -11,6 +17,11 @@ struct PendingFile(Mutex<Option<String>>);
 const MARKDOWN_EXTENSIONS: [&str; 4] = ["md", "markdown", "mdx", "mdown"];
 const MAX_DEPTH: usize = 4;
 const MAX_FILES: usize = 2000;
+const IMAGE_EXTENSIONS: [&str; 12] = [
+    "png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico", "heic", "tif", "tiff",
+];
+/// The folder beside a note that its uploaded images are written to.
+const ASSETS_DIR: &str = "assets";
 const MAX_PAGE_BYTES: usize = 600_000;
 const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh) Grimm/0.1 LinkPreview";
 
@@ -104,6 +115,100 @@ fn collect_markdown(dir: &Path, depth: usize, out: &mut Vec<String>) -> std::io:
         }
     }
     Ok(())
+}
+
+fn image_extension(path: &Path) -> Option<String> {
+    let extension = path.extension()?.to_str()?.to_lowercase();
+    IMAGE_EXTENSIONS.contains(&extension.as_str()).then_some(extension)
+}
+
+/// Writes an uploaded image into the `assets` folder beside a note and returns
+/// its path relative to the note, which is what goes into the Markdown.
+///
+/// The image bytes are the raw request body, so they skip JSON encoding; the
+/// note's path and the picked file's name arrive percent-encoded in headers.
+#[tauri::command]
+fn save_image(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("the image data is missing".into());
+    };
+    let header = |name: &str| -> Result<String, String> {
+        let value = request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| format!("the {name} header is missing"))?;
+        percent_encoding::percent_decode_str(value)
+            .decode_utf8()
+            .map(|decoded| decoded.into_owned())
+            .map_err(|e| e.to_string())
+    };
+    let note = header("note")?;
+    let name = header("name")?;
+    write_image(Path::new(&note), &name, bytes)
+}
+
+fn write_image(note: &Path, name: &str, bytes: &[u8]) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("the image is empty".into());
+    }
+    let folder = note
+        .parent()
+        .filter(|_| note.is_absolute())
+        .ok_or("the note has no folder")?;
+    let name = Path::new(name);
+    let extension = image_extension(name).ok_or("that file is not an image")?;
+    // Plain names keep the Markdown link free of escapes and angle brackets.
+    let mut stem = String::new();
+    for c in name.file_stem().and_then(|s| s.to_str()).unwrap_or_default().chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            stem.push(c);
+        } else if !stem.ends_with('-') {
+            stem.push('-');
+        }
+    }
+    let stem = stem.trim_matches('-');
+    let stem = if stem.is_empty() { "image" } else { stem };
+
+    let dir = folder.join(ASSETS_DIR);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    for n in 1.. {
+        let file_name = match n {
+            1 => format!("{stem}.{extension}"),
+            _ => format!("{stem}-{n}.{extension}"),
+        };
+        let path = dir.join(&file_name);
+        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(bytes) {
+                    let _ = fs::remove_file(&path);
+                    return Err(e.to_string());
+                }
+            }
+            // The same picture uploaded again reuses the file; a different one gets the next name.
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                if fs::read(&path).map_or(true, |existing| existing != bytes) {
+                    continue;
+                }
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+        return Ok(format!("{ASSETS_DIR}/{file_name}"));
+    }
+    unreachable!()
+}
+
+/// Lets the webview load one local image through the asset protocol. Nothing
+/// is in that scope to begin with, so only images a note points at are readable.
+#[tauri::command]
+fn allow_image(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let path = Path::new(&path);
+    if !path.is_file() || image_extension(path).is_none() {
+        return Err("not an image file".into());
+    }
+    app.asset_protocol_scope()
+        .allow_file(path)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -212,6 +317,8 @@ pub fn run() {
             write_file,
             list_markdown_files,
             fetch_page,
+            save_image,
+            allow_image,
             take_pending_file
         ])
         .build(tauri::generate_context!())
@@ -228,4 +335,30 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn images_are_written_beside_the_note() {
+        let dir = std::env::temp_dir().join(format!("grimm-images-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let note = dir.join("note.md");
+
+        assert_eq!(write_image(&note, "My Photo (1).PNG", b"one").unwrap(), "assets/My-Photo-1.png");
+        assert_eq!(fs::read(dir.join("assets/My-Photo-1.png")).unwrap(), b"one");
+        // Same bytes reuse the file, different bytes never overwrite it.
+        assert_eq!(write_image(&note, "My Photo (1).PNG", b"one").unwrap(), "assets/My-Photo-1.png");
+        assert_eq!(write_image(&note, "My Photo (1).PNG", b"two").unwrap(), "assets/My-Photo-1-2.png");
+        assert_eq!(fs::read(dir.join("assets/My-Photo-1.png")).unwrap(), b"one");
+        assert_eq!(write_image(&note, "../../é.jpg", b"three").unwrap(), "assets/image.jpg");
+
+        assert!(write_image(&note, "script.sh", b"x").is_err());
+        assert!(write_image(&note, "empty.png", b"").is_err());
+        assert!(write_image(Path::new("note.md"), "a.png", b"x").is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }

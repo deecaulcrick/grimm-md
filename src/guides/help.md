@@ -15,6 +15,8 @@ Two other notes come with Grimm, both in the **Help** menu:
 
 **How do I know a note is unsaved?** Its tab shows a dot, and the status bar says *Edited*. Grimm asks before closing a note with unsaved changes.
 
+**Where do uploaded images go?** Into a folder called `assets`, next to the note. The note links to them by a relative path, so keep the folder with the note when you move it. A new note has to be saved before a picture can be uploaded into it, and Grimm asks you to do that first.
+
 **Will my tabs come back next time?** Yes, for notes that have been saved to a file. Unsaved, untitled notes are not kept.
 
 ## Writing

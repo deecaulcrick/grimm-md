@@ -22,6 +22,7 @@ Everything Grimm can do, in one place. Reopen this list any time from the **Help
 
 ## Links and embeds
 
+- **Images.** Paste a web address, or upload a picture: it is copied into an `assets` folder beside the note and linked by a relative path, so the note and its pictures move together. Pictures already on your disk show too, whether the link is relative to the note or a full path.
 - **Link cards.** A web address on a line of its own is shown as a preview card with the page's title, description and image. The file still contains only the link. Grimm fetches the page once to build the card.
 - **HTML embeds.** A code block with the language `embed` is rendered as live HTML in a sandboxed frame, so you can drop in a video, a map or a small widget.
 
