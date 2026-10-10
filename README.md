@@ -1,42 +1,55 @@
+<img src="app-icon.png" width="96" alt="Grimm icon">
+
 # Grimm
 
-A clean markdown editor for macOS, built with Tauri and Milkdown.
+A quiet Markdown editor for macOS. You type Markdown and the page formats itself as you go, with no preview pane and no toolbar full of buttons.
 
-- `npm run tauri dev` — run in development
-- `npm run tauri build -- --bundles app` — build `src-tauri/target/release/bundle/macos/Grimm.app`
+Your notes stay ordinary `.md` files on your own disk. There is no account, no library to import into and no format of its own.
+
+## Download
+
+Get the latest `.dmg` from the [Releases page](https://github.com/deecaulcrick/grimm-md/releases/latest). Grimm is a universal app for Apple silicon and Intel Macs, and it keeps itself up to date after that.
+
+The app is not notarised by Apple, so macOS may block it the first time you open it. If it does, allow it under **System Settings → Privacy & Security → Open Anyway**.
+
+## What it does
+
+- **Live formatting.** Headings, lists, quotes, bold, italic and code take shape as you type them.
+- **Checkboxes.** Type `[]` at the start of a line for a task you can tick.
+- **Insert menu.** Type `/` for tables, code blocks, images, dividers and embeds.
+- **Drag anything.** Move blocks and list items by their grip, reorder table rows and columns, reorder tabs, and drag files from the sidebar into a pane.
+- **Tabs and split view.** Keep several notes open, two side by side.
+- **Outline.** Jump between the headings of a long note.
+- **Link cards.** A URL on a line of its own becomes a preview card. The file still contains just the link.
+- **HTML embeds.** A code block with the language `embed` is rendered as live HTML in a sandboxed frame.
+- **Twelve themes**, six light and six dark, with a serif, sans or mono page font, three text sizes, and a centred or full-width page.
+- **Plain Markdown underneath.** Press ⌘/ to edit the raw source at any time.
+
+The app opens with a short welcome note and a full feature list on first launch; both are under the **Help** menu afterwards.
+
+## Shortcuts
 
 | Shortcut | Action |
 | --- | --- |
 | ⌘N | New tab |
 | ⌘W | Close tab |
 | ⇧⌘] / ⇧⌘[ | Next / previous tab |
-| ⇧⌘\ | Toggle split view |
+| ⇧⌘\\ | Toggle split view |
 | ⌘O / ⇧⌘O | Open file / folder |
-| ⌘S / ⇧⌘S | Save / Save as |
-| ⌘/ | Toggle Document ↔ Markdown source |
-| ⌘\ | Toggle sidebar |
+| ⌘S / ⇧⌘S | Save / Save As |
+| ⌘/ | Toggle page ↔ Markdown source |
+| ⌘\\ | Toggle sidebar |
 
-⌘-click a file in the sidebar to open it in the other pane. Themes live in `src/themes.ts`.
+⌘-click a file in the sidebar to open it in the other pane.
 
-## Embeds
+## Building from source
 
-- **Link cards** — a URL alone on its own line is shown as a preview card. The file still contains just the link.
-- **HTML embeds** — a fenced code block with the language `embed` is rendered as live HTML (including `<iframe>`s) in a sandboxed frame. Insert one with `/` → HTML embed.
+Grimm is built with [Tauri](https://tauri.app) and [Milkdown](https://milkdown.dev). You need Node.js and a Rust toolchain.
 
-## Releasing an update
+```sh
+npm install
+npm run tauri dev                      # run in development
+npm run tauri build -- --bundles app   # build Grimm.app
+```
 
-Installed copies of Grimm check `latest.json` on the newest GitHub release at launch (and from **Grimm → Check for Updates…**), then download, verify and install it.
-
-One-time setup:
-
-1. Push this repo to `github.com/deecaulcrick/grimm-md` (public — the update endpoint in `src-tauri/tauri.conf.json` points there).
-2. Add the update signing key as repository secrets. The key lives outside the repo at `~/.tauri/grimm.key`; it has no password.
-   - `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/grimm.key`
-   - `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body ""`
-
-For each release:
-
-1. Bump `version` in `src-tauri/tauri.conf.json` (and `package.json`, `src-tauri/Cargo.toml`).
-2. Commit, then tag and push: `git tag v0.2.0 && git push origin main --tags`.
-
-The Release workflow builds a universal macOS app, signs the update and publishes the release. Keep `~/.tauri/grimm.key` backed up: updates signed with a different key are rejected by installed copies.
+The built app lands in `src-tauri/target/release/bundle/macos/`. Themes live in `src/themes.ts`.

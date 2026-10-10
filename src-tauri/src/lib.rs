@@ -111,9 +111,12 @@ fn take_pending_file(state: tauri::State<PendingFile>) -> Option<String> {
     state.0.lock().unwrap().take()
 }
 
-/// Builds the menu bar. Custom items are forwarded to the frontend as "menu"
-/// events carrying the item id, which is where the commands are implemented.
-fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+/// Builds the menu bar, returning it with its Help submenu. Custom items are
+/// forwarded to the frontend as "menu" events carrying the item id, which is
+/// where the commands are implemented.
+fn build_menu(
+    app: &tauri::AppHandle,
+) -> tauri::Result<(tauri::menu::Menu<tauri::Wry>, tauri::menu::Submenu<tauri::Wry>)> {
     let item = |id: &str, text: &str, accelerator: &str| {
         MenuItemBuilder::with_id(id, text)
             .accelerator(accelerator)
@@ -167,9 +170,17 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .item(&item("prev-tab", "Previous Tab", "CmdOrCtrl+Shift+BracketLeft")?)
         .build()?;
 
-    MenuBuilder::new(app)
-        .items(&[&app_menu, &file, &edit, &view, &window])
-        .build()
+    let help = SubmenuBuilder::new(app, "Help")
+        .text("help", "Grimm Help")
+        .separator()
+        .text("welcome", "Welcome to Grimm")
+        .text("features", "Features")
+        .build()?;
+
+    let menu = MenuBuilder::new(app)
+        .items(&[&app_menu, &file, &edit, &view, &window, &help])
+        .build()?;
+    Ok((menu, help))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -181,8 +192,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PendingFile::default())
         .setup(|app| {
-            let menu = build_menu(app.handle())?;
+            let (menu, _help) = build_menu(app.handle())?;
             app.set_menu(menu)?;
+            // Gives the Help menu its search field and standard place in the menu bar.
+            #[cfg(target_os = "macos")]
+            _help.set_as_help_menu_for_nsapp()?;
             app.on_menu_event(|app, event| {
                 let _ = app.emit("menu", event.id().as_ref());
             });

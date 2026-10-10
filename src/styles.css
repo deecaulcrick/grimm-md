@@ -201,6 +201,14 @@ body.resizing iframe {
   width: var(--sidebar-w);
 }
 
+.sidebar-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px 10px;
+  width: var(--sidebar-w);
+}
+
 .nav-item {
   display: flex;
   align-items: center;

@@ -1,5 +1,6 @@
 import { Crepe } from "@milkdown/crepe";
 import { editorViewCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
+import { headingIdGenerator } from "@milkdown/kit/preset/commonmark";
 import { redo, undo } from "@milkdown/kit/prose/history";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
@@ -14,6 +15,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import {
   ArrowRightLeft,
+  CircleQuestionMark,
   Code,
   Columns2,
   FileText,
@@ -30,6 +32,9 @@ import {
 import { blockDrag } from "./blockDrag";
 import { codeTheme } from "./codeTheme";
 import { blockEditIcons, embedIcon, toolbarIcons } from "./editorIcons";
+import featuresGuide from "./guides/features.md?raw";
+import helpGuide from "./guides/help.md?raw";
+import welcomeGuide from "./guides/welcome.md?raw";
 import { codeLanguages, insertEmbed, renderEmbed } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
 import { Outline } from "./outline";
@@ -44,6 +49,8 @@ type DocSize = "small" | "normal" | "large";
 
 interface Doc {
   path: string | null;
+  // The name of a built-in guide, shown on its tab until it is saved somewhere.
+  title: string | null;
   dirty: boolean;
   mode: Mode;
   crepe: Crepe | null;
@@ -111,9 +118,9 @@ const dirname = (p: string) => p.replace(/[\\/][^\\/]*$/, "");
 const isMarkdown = (p: string) =>
   MARKDOWN_EXTENSIONS.includes(p.split(".").pop()?.toLowerCase() ?? "");
 const tildify = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
-const docName = (doc: Doc) => (doc.path ? basename(doc.path) : "Untitled");
+const docName = (doc: Doc) => (doc.path ? basename(doc.path) : (doc.title ?? "Untitled"));
 const allDocs = () => panes.flatMap((p) => p.docs);
-const isPristine = (doc: Doc) => !doc.path && !doc.dirty;
+const isPristine = (doc: Doc) => !doc.path && !doc.dirty && !doc.title;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = ""): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -548,6 +555,9 @@ async function mountRich(doc: Doc, markdown: string) {
   });
   instance.editor.config((ctx) => {
     ctx.update(remarkStringifyOptionsCtx, (options) => ({ ...options, bullet: "-" as const, rule: "-" as const }));
+    // Headings get an id from their text. Prefixed, a heading called "Appearance"
+    // or "Sidebar" cannot collide with the app's own element of that id.
+    ctx.update(headingIdGenerator.key, (slug) => (node) => `h-${slug(node)}`);
   });
   instance.editor.use(linkCards).use(taskShortcut).use(blockDrag);
   instance.on((listener) => {
@@ -580,7 +590,7 @@ async function setMode(doc: Doc, next: Mode) {
   render();
 }
 
-async function createDoc(pane: Pane, path: string | null, content: string): Promise<Doc> {
+async function createDoc(pane: Pane, path: string | null, content: string, title: string | null = null): Promise<Doc> {
   const docEl = el("div", "doc");
   const page = el("div", "page");
   const editorEl = el("div", "editor");
@@ -593,6 +603,7 @@ async function createDoc(pane: Pane, path: string | null, content: string): Prom
 
   const doc: Doc = {
     path,
+    title,
     dirty: false,
     mode: "rich",
     crepe: null,
@@ -688,6 +699,44 @@ async function openPath(
   render();
 }
 
+// ---------- guides ----------
+
+// The notes Grimm ships with. They open as unsaved documents, so they can be
+// edited freely and are only written to disk if the reader saves them.
+const GUIDES = {
+  welcome: { title: "Welcome to Grimm", text: welcomeGuide },
+  features: { title: "Features", text: featuresGuide },
+  help: { title: "Help", text: helpGuide },
+};
+
+async function openGuide(id: keyof typeof GUIDES) {
+  const { title, text } = GUIDES[id];
+  const existing = allDocs().find((d) => d.title === title);
+  if (existing) return activate(existing);
+  const pane = focused;
+  const placeholder = pane.active && isPristine(pane.active) ? pane.active : null;
+  await createDoc(pane, null, text, title);
+  if (placeholder) await closeDoc(placeholder, false);
+  render();
+}
+
+/** The first time Grimm runs, it opens on the welcome note with the feature list beside it. */
+async function welcome() {
+  if (localStorage.getItem("welcomed")) return;
+  localStorage.setItem("welcomed", "1");
+  if (allDocs().some((d) => !isPristine(d))) return;
+  await openGuide("features");
+  await openGuide("welcome");
+  const pane = focused;
+  const first = pane.docs.find((d) => d.title === GUIDES.welcome.title);
+  // Welcome first in the tab bar, and the one on screen.
+  if (first) {
+    pane.docs.splice(pane.docs.indexOf(first), 1);
+    pane.docs.unshift(first);
+    activate(first);
+  }
+}
+
 async function openDialog() {
   if (!inTauri) return toast("Opening files needs the desktop app");
   const picked = await open({
@@ -706,7 +755,7 @@ async function saveDocument(doc: Doc | null, saveAs = false) {
   let target = doc.path;
   if (!target || saveAs) {
     const picked = await save({
-      defaultPath: doc.path ?? (folder ? `${folder}/Untitled.md` : "Untitled.md"),
+      defaultPath: doc.path ?? `${folder ? `${folder}/` : ""}${doc.title ?? "Untitled"}.md`,
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     if (!picked) return;
@@ -719,6 +768,7 @@ async function saveDocument(doc: Doc | null, saveAs = false) {
     return;
   }
   doc.path = target;
+  doc.title = null;
   doc.dirty = false;
   if (doc.mode === "rich" && doc.crepe) doc.baseline = doc.crepe.getMarkdown();
   rememberRecent(target);
@@ -1075,6 +1125,9 @@ const commands: Record<string, () => unknown> = {
   // Goes through the window so the unsaved-changes check runs first.
   quit: () => inTauri && getCurrentWindow().close(),
   "check-updates": () => checkForUpdates(true),
+  welcome: () => openGuide("welcome"),
+  features: () => openGuide("features"),
+  help: () => openGuide("help"),
 };
 
 // A shortcut can arrive both as a keydown and as a native menu event; the
@@ -1118,13 +1171,14 @@ function shortcut(e: KeyboardEvent): string | null {
 // ---------- wiring ----------
 
 createIcons({
-  icons: { Plus, FileText, FolderOpen, X },
+  icons: { Plus, FileText, FolderOpen, X, CircleQuestionMark },
   attrs: ICON_ATTRS,
 });
 
 $("btn-new").addEventListener("click", () => newDocument());
 $("btn-open").addEventListener("click", openDialog);
 $("btn-folder").addEventListener("click", openFolderDialog);
+$("btn-help").addEventListener("click", () => openGuide("help"));
 $("btn-close-folder").addEventListener("click", () => {
   folder = null;
   folderFiles = [];
@@ -1149,8 +1203,7 @@ window.addEventListener("resize", () => {
   for (const pane of panes) if (pane.active?.mode === "source") autosizeSource(pane.active);
 });
 
-async function restoreSession() {
-  const saved: Session | null = JSON.parse(localStorage.getItem("session") ?? "null");
+async function restoreSession(saved: Session | null) {
   for (const [index, entry] of (saved?.panes ?? []).slice(0, MAX_PANES).entries()) {
     if (!entry.paths.length) continue;
     focused = index === 0 ? panes[0] : createPane();
@@ -1177,12 +1230,14 @@ async function init() {
   draggable($("sidebar-resizer"), setSidebarWidth, () => setSidebarWidth(SIDEBAR_DEFAULT));
   if (inTauri && navigator.userAgent.includes("Mac")) app.classList.add("overlay-titlebar");
 
+  // Read before the first document exists: creating it saves the (empty) session over this one.
+  const saved: Session | null = JSON.parse(localStorage.getItem("session") ?? "null");
   focused = createPane();
   await createDoc(focused, null, "");
 
-  if (!inTauri) return;
+  if (!inTauri) return void (await welcome());
 
-  await restoreSession();
+  await restoreSession(saved);
 
   await listen<string>("menu", ({ payload }) => run(payload));
 
@@ -1209,6 +1264,7 @@ async function init() {
 
   const pending = await invoke<string | null>("take_pending_file");
   if (pending) await openPath(pending);
+  else await welcome();
   await refreshFolder();
   checkForUpdates();
 }
