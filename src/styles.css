@@ -1,14 +1,17 @@
 :root {
   /* Base tokens; overwritten by the active theme (see themes.ts). */
-  --bg: #f7f2e0;
-  --sidebar: #efe8d0;
-  --surface: #fffbee;
+  --bg: #faf8f4;
+  --sidebar: #f0ede6;
+  --surface: #ffffff;
   --text: #5b0015;
   --accent: #80aee8;
   --button: #5b0015;
-  --on-button: #f7f2e0;
+  --on-button: #faf8f4;
+  --heading: var(--text);
 
-  /* Everything else is derived, so a theme only needs the seven colours above. */
+  /* Everything else is derived, so a theme only needs the colours above. */
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --marker: color-mix(in srgb, var(--accent) 78%, var(--text));
   --text-2: color-mix(in srgb, var(--text) 72%, var(--bg));
   --text-3: color-mix(in srgb, var(--text) 50%, var(--bg));
   --border: color-mix(in srgb, var(--text) 13%, transparent);
@@ -298,7 +301,11 @@ body.resizing iframe {
 }
 
 .file-list li.current {
-  background: var(--active);
+  background: var(--accent-soft);
+}
+
+.file-list li.current .name {
+  font-weight: 500;
 }
 
 .file-list .name {
@@ -458,7 +465,7 @@ body.resizing iframe {
 }
 
 .tab.active {
-  background: var(--active);
+  background: var(--accent-soft);
   color: var(--text);
 }
 
@@ -692,7 +699,7 @@ body.dragging-tab .toc {
 }
 
 .toc-lines i.active {
-  background: var(--text);
+  background: var(--accent);
   opacity: 1;
 }
 
@@ -758,7 +765,7 @@ body.dragging-tab .toc {
 .toc-item.active {
   color: var(--text);
   font-weight: 500;
-  background: var(--active);
+  background: var(--accent-soft);
 }
 
 body.resizing .toc {
@@ -820,6 +827,7 @@ body.resizing .toc {
   letter-spacing: -0.01em;
   line-height: 1.25;
   padding: 0;
+  color: var(--heading);
 }
 
 .editor .milkdown .ProseMirror h1 {
@@ -860,14 +868,17 @@ body.resizing .toc {
 .editor .milkdown .ProseMirror a {
   color: var(--link);
   text-decoration: underline;
+  text-decoration-color: var(--accent);
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
 }
 
 .editor .milkdown .ProseMirror blockquote {
   margin: 1em 0;
-  padding: 0 0 0 18px;
+  padding: 10px 16px 10px 18px;
   border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   color: var(--text-2);
 }
 
@@ -886,9 +897,10 @@ body.resizing .toc {
 
 .editor .milkdown .ProseMirror hr {
   border: 0;
-  height: 1px;
+  height: 2px;
   padding: 0;
-  background: var(--border-strong);
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
   margin: 2em 0;
 }
 
@@ -916,6 +928,11 @@ body.resizing .toc {
 .editor .milkdown .ProseMirror table {
   font-family: var(--doc-font);
   font-size: 0.92em;
+}
+
+.editor .milkdown .ProseMirror th {
+  background: var(--accent-soft);
+  color: var(--heading);
 }
 
 .editor .milkdown .ProseMirror img {
@@ -1442,7 +1459,12 @@ body.resizing .toc {
   padding: 0;
 }
 
+.editor .milkdown .milkdown-list-item-block li .label-wrapper .checked svg {
+  fill: var(--marker);
+}
+
 .editor .milkdown .milkdown-list-item-block li .label-wrapper .label {
+  color: var(--marker);
   display: flex;
   align-items: center;
   justify-content: center;

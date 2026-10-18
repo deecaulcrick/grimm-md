@@ -36,7 +36,7 @@ Everything Grimm can do, in one place. Reopen this list any time from the **Help
 
 ## Appearance
 
-- **Twelve themes.** Six light (Meadow, Bordeaux, Lime, Lilac, Mint, Crimson) and six dark (Grimm, Merlot, Iron, Midnight, Plum, Ember).
+- **Eighteen themes.** Nine light (Meadow, Lilac, Paper, Sepia, Fog, Contrast, Riso, Bubblegum, Lagoon) and nine dark (Grimm, Merlot, Iron, Midnight, Graphite, Nightshift, Contrast Dark, Jungle, Ultraviolet).
 - **Three typefaces.** Serif, sans or mono for the page.
 - **Three text sizes.** Small, normal or large.
 - **Page width.** A centred column, or the full width of the window.

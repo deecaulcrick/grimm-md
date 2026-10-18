@@ -51,7 +51,7 @@ import { Outline } from "./outline";
 import { installTableDrag } from "./tableDrag";
 import { fingerprint, publish, shareHost, shareRecord, unshare, type ShareInput } from "./share";
 import { taskShortcut } from "./taskShortcut";
-import { THEMES, applyTheme, type Theme } from "./themes";
+import { THEMES, applyTheme, findTheme, type Theme } from "./themes";
 
 type Mode = "rich" | "source";
 type DocFont = "serif" | "sans" | "mono";
@@ -114,7 +114,7 @@ let folder: string | null = localStorage.getItem("folder");
 let folderFiles: string[] = [];
 let recents: string[] = JSON.parse(localStorage.getItem("recents") ?? "[]");
 let theme: Theme =
-  THEMES.find((t) => t.id === localStorage.getItem("theme")) ??
+  findTheme(localStorage.getItem("theme")) ??
   THEMES.find((t) => t.scheme === (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"))!;
 
 const DOC_FONTS: DocFont[] = ["serif", "sans", "mono"];

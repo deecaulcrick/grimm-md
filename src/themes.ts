@@ -9,6 +9,8 @@ export interface Theme {
   accent: string;
   button: string;
   onButton: string;
+  /** Heading colour; defaults to the text colour. */
+  heading?: string;
 }
 
 export const THEMES: Theme[] = [
@@ -25,30 +27,6 @@ export const THEMES: Theme[] = [
     onButton: "#FFFFFF",
   },
   {
-    id: "bordeaux",
-    name: "Bordeaux",
-    scheme: "light",
-    bg: "#F7F2E0",
-    sidebar: "#EFE8D0",
-    surface: "#FFFBEE",
-    text: "#5B0015",
-    accent: "#80AEE8",
-    button: "#5B0015",
-    onButton: "#F7F2E0",
-  },
-  {
-    id: "lime",
-    name: "Lime",
-    scheme: "light",
-    bg: "#F8FBE8",
-    sidebar: "#E6F1B8",
-    surface: "#FDFFF3",
-    text: "#17243F",
-    accent: "#9CC700",
-    button: "#D4F23B",
-    onButton: "#17243F",
-  },
-  {
     id: "lilac",
     name: "Lilac",
     scheme: "light",
@@ -60,29 +38,99 @@ export const THEMES: Theme[] = [
     button: "#7A5FC4",
     onButton: "#FFFFFF",
   },
+  // Bordeaux ink on a neutral, low-glare page.
   {
-    id: "mint",
-    name: "Mint",
+    id: "paper",
+    name: "Paper",
     scheme: "light",
-    bg: "#F3FAF4",
-    sidebar: "#E3F1E6",
+    bg: "#FAF8F4",
+    sidebar: "#F0EDE6",
     surface: "#FFFFFF",
-    text: "#173524",
-    accent: "#2E9460",
-    button: "#257A4E",
-    onButton: "#FFFFFF",
+    text: "#5B0015",
+    accent: "#4F86D0",
+    button: "#5B0015",
+    onButton: "#FAF8F4",
   },
+  // Warm and easy on the eyes for long reading.
   {
-    id: "crimson",
-    name: "Crimson",
+    id: "sepia",
+    name: "Sepia",
+    scheme: "light",
+    bg: "#F3EAD8",
+    sidebar: "#E9DDC5",
+    surface: "#FBF5E9",
+    text: "#2E2116",
+    accent: "#AE4F24",
+    button: "#2E2116",
+    onButton: "#F3EAD8",
+  },
+  // Low saturation, nothing competes with the words.
+  {
+    id: "fog",
+    name: "Fog",
+    scheme: "light",
+    bg: "#ECEEEF",
+    sidebar: "#E0E3E5",
+    surface: "#F7F8F9",
+    text: "#1E2327",
+    accent: "#4F7185",
+    button: "#33424C",
+    onButton: "#F7F8F9",
+  },
+  // Maximum legibility: bright rooms, low vision.
+  {
+    id: "contrast",
+    name: "Contrast",
     scheme: "light",
     bg: "#FFFFFF",
-    sidebar: "#F6F5F4",
+    sidebar: "#EFEFEF",
     surface: "#FFFFFF",
-    text: "#1C1616",
-    accent: "#f01a21",
-    button: "#d60e15",
+    text: "#000000",
+    accent: "#0040E0",
+    button: "#000000",
     onButton: "#FFFFFF",
+  },
+  // Risograph print: blue ink, fluorescent pink headings.
+  {
+    id: "riso",
+    name: "Riso",
+    scheme: "light",
+    bg: "#FBF3EA",
+    sidebar: "#F3E6D6",
+    surface: "#FFFAF4",
+    text: "#1E2A78",
+    heading: "#D3204F",
+    accent: "#E8365F",
+    button: "#1E2A78",
+    onButton: "#FBF3EA",
+  },
+  // Pink page, magenta headings, violet accent.
+  {
+    id: "bubblegum",
+    name: "Bubblegum",
+    scheme: "light",
+    bg: "#FFE9F1",
+    sidebar: "#FFD6E5",
+    surface: "#FFF5F9",
+    text: "#3A0D2E",
+    heading: "#C2185B",
+    accent: "#6A4CFF",
+    button: "#3A0D2E",
+    onButton: "#FFE9F1",
+  },
+  // Pale teal with a coral accent.
+  {
+    id: "lagoon",
+    name: "Lagoon",
+    scheme: "light",
+    bg: "#DFF5F1",
+    sidebar: "#C8EBE5",
+    surface: "#F0FBF9",
+    text: "#08343A",
+    heading: "#0B6E69",
+    accent: "#E8553A",
+    button: "#08343A",
+    onButton: "#DFF5F1",
   },
   {
     id: "grimm",
@@ -132,31 +180,91 @@ export const THEMES: Theme[] = [
     button: "#8FA8FF",
     onButton: "#0B1026",
   },
+  // Neutral dark; softened text avoids halation.
   {
-    id: "plum",
-    name: "Plum",
+    id: "graphite",
+    name: "Graphite",
     scheme: "dark",
-    bg: "#1F1629",
-    sidebar: "#291D36",
-    surface: "#362747",
-    text: "#EFE6F5",
-    accent: "#E58FB8",
-    button: "#C9A7F5",
-    onButton: "#1F1629",
+    bg: "#1C1D1F",
+    sidebar: "#151618",
+    surface: "#27292C",
+    text: "#DDDAD3",
+    accent: "#7AA7FF",
+    button: "#DDDAD3",
+    onButton: "#1C1D1F",
   },
+  // Warm near-black with folk-art orange and blue, for late-night writing.
   {
-    id: "ember",
-    name: "Ember",
+    id: "nightshift",
+    name: "Nightshift",
     scheme: "dark",
-    bg: "#0C0C0C",
-    sidebar: "#141414",
-    surface: "#1E1E1E",
-    text: "#F1ECE6",
-    accent: "#ff6a00",
-    button: "#ff6a00",
-    onButton: "#0C0C0C",
+    bg: "#1A1410",
+    sidebar: "#130E0B",
+    surface: "#261D17",
+    text: "#E6D3B3",
+    accent: "#F06438",
+    button: "#4A72B8",
+    onButton: "#FFFFFF",
+  },
+  // Maximum legibility in the dark.
+  {
+    id: "contrast-dark",
+    name: "Contrast Dark",
+    scheme: "dark",
+    bg: "#000000",
+    sidebar: "#0E0E0E",
+    surface: "#171717",
+    text: "#FFFFFF",
+    accent: "#FFD400",
+    button: "#FFFFFF",
+    onButton: "#000000",
+  },
+  // Deep green, peach headings, marigold accent.
+  {
+    id: "jungle",
+    name: "Jungle",
+    scheme: "dark",
+    bg: "#0F3D2E",
+    sidebar: "#0A3024",
+    surface: "#174A39",
+    text: "#F2EDDC",
+    heading: "#FFB4A2",
+    accent: "#F9C74F",
+    button: "#F9C74F",
+    onButton: "#0F3D2E",
+  },
+  // Deep violet, mint headings, hot pink accent.
+  {
+    id: "ultraviolet",
+    name: "Ultraviolet",
+    scheme: "dark",
+    bg: "#2B1055",
+    sidebar: "#220C45",
+    surface: "#38176A",
+    text: "#F3EAFF",
+    heading: "#7CFFCB",
+    accent: "#FF7AC6",
+    button: "#7CFFCB",
+    onButton: "#2B1055",
   },
 ];
+
+// Themes that were removed, mapped to the closest one still offered, so saved
+// settings and shared pages keep a similar look.
+const RETIRED: Record<string, string> = {
+  bordeaux: "paper",
+  crimson: "paper",
+  lime: "meadow",
+  mint: "meadow",
+  plum: "midnight",
+  ember: "graphite",
+  bloom: "nightshift",
+};
+
+export function findTheme(id: string | null): Theme | undefined {
+  const resolved = id && (RETIRED[id] ?? id);
+  return THEMES.find((t) => t.id === resolved);
+}
 
 export function applyTheme(theme: Theme) {
   const root = document.documentElement;
@@ -168,4 +276,6 @@ export function applyTheme(theme: Theme) {
   root.style.setProperty("--accent", theme.accent);
   root.style.setProperty("--button", theme.button);
   root.style.setProperty("--on-button", theme.onButton);
+  if (theme.heading) root.style.setProperty("--heading", theme.heading);
+  else root.style.removeProperty("--heading");
 }
