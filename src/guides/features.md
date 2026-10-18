@@ -7,7 +7,7 @@ Everything Grimm can do, in one place. Reopen this list any time from the **Help
 - **Live formatting.** Markdown turns into headings, lists, quotes, bold, italic and code as you type it. No separate preview.
 - **Checkboxes.** Type `[]` at the start of a line, or inside a bullet, for a task you can tick. `[x]` makes one that is already done.
 - **Selection toolbar.** Select text for bold, italic, strikethrough, inline code and links.
-- **Insert menu.** Type `/` on an empty line for headings, lists, quotes, dividers, images, code blocks, tables and embeds.
+- **Insert menu.** Type `/` on an empty line for headings, lists, quotes, dividers, images, code blocks, tables, embeds and diagrams.
 - **Tables.** Add rows and columns, align columns, and drag rows and columns into a new order.
 - **Code blocks.** Syntax highlighting for many languages, with a language picker and a copy button.
 - **Undo and redo** for everything, including moving blocks.
@@ -25,6 +25,7 @@ Everything Grimm can do, in one place. Reopen this list any time from the **Help
 - **Images.** Paste a web address, or upload a picture: it is copied into an `assets` folder beside the note and linked by a relative path, so the note and its pictures move together. Pictures already on your disk show too, whether the link is relative to the note or a full path.
 - **Link cards.** A web address on a line of its own is shown as a preview card with the page's title, description and image. The file still contains only the link. Grimm fetches the page once to build the card.
 - **HTML embeds.** A code block with the language `embed` is rendered as live HTML in a sandboxed frame, so you can drop in a video, a map or a small widget.
+- **Diagrams.** A code block with the language `mermaid` is drawn as a diagram in the note's colours: flowcharts, sequence diagrams, timelines, pie charts and more. Click **Edit source** to change it; the diagram redraws as you type.
 
 ## Finding your way
 

@@ -95,3 +95,15 @@ A code block with the language `embed` runs as live HTML:
 </style>
 <span>Live HTML, right in the page</span>
 ```
+
+## Diagram
+
+A code block with the language `mermaid` is drawn as a diagram:
+
+```mermaid
+flowchart LR
+  A[Write a note] --> B{Needs a picture?}
+  B -- Yes --> C[Add a diagram]
+  B -- No --> D[Keep writing]
+  C --> D
+```

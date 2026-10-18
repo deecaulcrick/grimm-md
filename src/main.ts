@@ -39,13 +39,15 @@ import {
 
 import { blockDrag } from "./blockDrag";
 import { codeTheme } from "./codeTheme";
-import { blockEditIcons, embedIcon, imageBlockConfig, tableIcons, toolbarIcons } from "./editorIcons";
+import { blockEditIcons, diagramIcon, embedIcon, imageBlockConfig, tableIcons, toolbarIcons } from "./editorIcons";
 import examplesGuide from "./guides/examples.md?raw";
 import featuresGuide from "./guides/features.md?raw";
 import helpGuide from "./guides/help.md?raw";
 import welcomeGuide from "./guides/welcome.md?raw";
 import { imageTitles, imageUrl, saveImage } from "./images";
-import { codeLanguages, insertEmbed, renderEmbed } from "./htmlEmbed";
+import { codeLanguages, insertCodeBlock, renderPreview } from "./codeBlocks";
+import { DIAGRAM_LANGUAGE } from "./diagrams";
+import { EMBED_LANGUAGE } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
 import { Outline } from "./outline";
 import { installTableDrag } from "./tableDrag";
@@ -559,9 +561,9 @@ async function mountRich(doc: Doc, markdown: string) {
       [Crepe.Feature.CodeMirror]: {
         theme: codeTheme,
         languages: codeLanguages,
-        renderPreview: renderEmbed,
+        renderPreview,
         previewOnlyByDefault: true,
-        previewToggleText: (previewOnly) => (previewOnly ? "Edit HTML" : "Hide HTML"),
+        previewToggleText: (previewOnly) => (previewOnly ? "Edit source" : "Hide source"),
       },
       [Crepe.Feature.Toolbar]: toolbarIcons,
       [Crepe.Feature.Table]: tableIcons,
@@ -573,7 +575,10 @@ async function mountRich(doc: Doc, markdown: string) {
       [Crepe.Feature.BlockEdit]: {
         ...blockEditIcons,
         buildMenu: (builder) => {
-          builder.getGroup("advanced").addItem("embed", { label: "HTML embed", icon: embedIcon, onRun: insertEmbed });
+          builder
+            .getGroup("advanced")
+            .addItem("embed", { label: "HTML embed", icon: embedIcon, onRun: insertCodeBlock(EMBED_LANGUAGE) })
+            .addItem("diagram", { label: "Diagram", icon: diagramIcon, onRun: insertCodeBlock(DIAGRAM_LANGUAGE) });
         },
       },
     },

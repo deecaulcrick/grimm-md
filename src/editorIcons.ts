@@ -27,6 +27,7 @@ import {
   Table,
   TextQuote,
   Type,
+  Workflow,
   createElement,
   type IconNode,
 } from "lucide";
@@ -94,3 +95,4 @@ export const imageBlockConfig = {
 };
 
 export const embedIcon = svg(AppWindow);
+export const diagramIcon = svg(Workflow);

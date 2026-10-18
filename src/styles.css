@@ -1335,7 +1335,7 @@ body.resizing .toc {
 
 /* ---------- HTML embeds ---------- */
 
-.html-embed-slot {
+.embed-slot {
   position: relative;
 }
 
@@ -1353,6 +1353,32 @@ body.resizing .toc {
   height: 120px;
   border: 0;
   background: transparent;
+}
+
+/* ---------- Diagrams ---------- */
+
+/* Diagram colours come from the theme, so switching theme recolours them without a redraw. */
+.mermaid-slot {
+  --pele-bg: var(--code-block);
+  --pele-fg: var(--text);
+  --pele-muted: var(--text-2);
+  --pele-line: var(--text-2);
+  --pele-surface: var(--bg);
+  --pele-surface-alt: color-mix(in srgb, var(--text) 4%, var(--code-block));
+  --pele-border: var(--border-strong);
+  --pele-accent: var(--accent);
+  --pele-error: var(--crepe-color-error);
+  --pele-font: var(--sans);
+  --pele-font-mono: var(--mono);
+  --pele-radius: 6px;
+  padding: 12px 0;
+  font-family: var(--sans);
+  color: var(--text);
+}
+
+.mermaid-slot svg.pele {
+  display: block;
+  margin: 0 auto;
 }
 
 .editor .milkdown .milkdown-code-block .preview-panel .preview {
