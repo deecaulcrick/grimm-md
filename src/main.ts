@@ -11,18 +11,26 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import {
   ArrowRightLeft,
+  Check,
   CircleQuestionMark,
+  Clock,
   Code,
+  Copy,
   Columns2,
   FileText,
   FolderOpen,
+  Globe,
+  Info,
   Palette,
   PanelLeft,
   Plus,
+  RefreshCw,
+  Share,
   X,
   createElement,
   createIcons,
@@ -41,6 +49,7 @@ import { codeLanguages, insertEmbed, renderEmbed } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
 import { Outline } from "./outline";
 import { installTableDrag } from "./tableDrag";
+import { fingerprint, publish, shareHost, shareRecord, unshare, type ShareInput } from "./share";
 import { taskShortcut } from "./taskShortcut";
 import { THEMES, applyTheme, type Theme } from "./themes";
 
@@ -96,6 +105,7 @@ const panesEl = $("panes");
 const docPath = $("doc-path");
 const docStats = $("doc-stats");
 const appearanceMenu = $("appearance");
+const shareMenu = $("share-menu");
 const toastEl = $("toast");
 
 const panes: Pane[] = [];
@@ -191,6 +201,13 @@ function renderBar(pane: Pane) {
   const actions = el("div", "pane-actions");
   const doc = pane.active;
   if (doc) {
+    const shared = Boolean(doc.path && shareRecord(doc.path));
+    const share = iconButton(shared ? Globe : Share, shared ? "Shared to web" : "Share to web", (e) => {
+      e.stopPropagation();
+      toggleShare(doc, e.currentTarget as HTMLElement);
+    }, "icon-btn share-btn");
+    share.classList.toggle("on", shared);
+    actions.append(share);
     const source = iconButton(Code, "Markdown source (⌘/)", () =>
       setMode(doc, doc.mode === "rich" ? "source" : "rich"),
     );
@@ -1090,11 +1107,230 @@ function renderAppearance() {
 
 function toggleAppearance(anchor: HTMLElement) {
   if (!appearanceMenu.hidden) return void (appearanceMenu.hidden = true);
+  shareMenu.hidden = true;
   renderAppearance();
   appearanceMenu.hidden = false;
   const rect = anchor.getBoundingClientRect();
   appearanceMenu.style.top = `${rect.bottom + 6}px`;
   appearanceMenu.style.left = `${Math.max(8, rect.right - appearanceMenu.offsetWidth)}px`;
+}
+
+// ---------- sharing ----------
+
+let shareDoc: Doc | null = null;
+let shareBusy: "publish" | "unshare" | null = null;
+
+function shareInput(doc: Doc): ShareInput | null {
+  if (!doc.path) return null;
+  return {
+    path: doc.path,
+    markdown: getContent(doc),
+    title: docName(doc).replace(/\.[^.]+$/, ""),
+    appearance: { theme: theme.id, font: docFont, size: docSize, width: pageWidth },
+  };
+}
+
+const shareDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "long" });
+
+function copyLink(url: string) {
+  return navigator.clipboard.writeText(url).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** Roughly what the shared page will lead with: its title and first line. */
+function sharePreview(markdown: string, fallback: string) {
+  const plain = (line: string) =>
+    line
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/[*_`~]+/g, "")
+      .replace(/^\s*(?:[-+*]|\d+\.|>)\s+(?:\[[ xX]\]\s+)?/, "")
+      .trim();
+  let title = "";
+  let line = "";
+  let inCode = false;
+  for (const raw of markdown.replace(FRONTMATTER, "").split("\n")) {
+    if (raw.trimStart().startsWith("```")) inCode = !inCode;
+    if (inCode || !raw.trim() || /^\s*(?:---|\*\*\*|___)\s*$/.test(raw) || /^\s*https?:\/\/\S+\s*$/.test(raw)) continue;
+    const heading = raw.match(/^#{1,6}\s+(.*)/);
+    if (heading && !title) title = plain(heading[1]);
+    else if (!heading && !line) line = plain(raw);
+    if (title && line) break;
+  }
+  return { title: title || fallback, line };
+}
+
+function shareRow(node: IconNode, label: string, detail = "", onClick?: () => void) {
+  const row = el(onClick ? "button" : "div", "share-row");
+  const text = el("span", "share-row-label");
+  text.textContent = label;
+  row.append(icon(node), text);
+  if (detail) {
+    const extra = el("span", "share-row-detail");
+    extra.textContent = detail;
+    row.append(extra);
+  }
+  if (onClick && row instanceof HTMLButtonElement) {
+    row.disabled = Boolean(shareBusy);
+    row.addEventListener("click", onClick);
+  }
+  return row;
+}
+
+function shareButton(label: string, className: string, onClick: () => void) {
+  const button = el("button", className);
+  button.textContent = label;
+  button.disabled = Boolean(shareBusy);
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+async function renderShareMenu(error = "") {
+  const doc = shareDoc;
+  if (!doc) return;
+  const input = shareInput(doc);
+  const record = input && shareRecord(input.path);
+  const changed = Boolean(input && record && (await fingerprint(input)) !== record.fingerprint);
+  // The menu may have moved on to another note while that was worked out.
+  if (shareDoc !== doc) return;
+
+  const head = el("div", "share-head");
+  const title = el("span", "share-title");
+  title.textContent = "Share to web";
+  head.append(title);
+  if (record) {
+    const live = el("span", "share-live");
+    live.textContent = "Live";
+    head.append(live);
+  }
+  const children: HTMLElement[] = [head];
+
+  if (!inTauri || !input) {
+    const note = el("p", "share-intro");
+    note.textContent = inTauri ? "Save this note to a file to share it as a web page." : "Sharing works in the Grimm app.";
+    children.push(note);
+  } else if (!record) {
+    const intro = el("p", "share-intro");
+    intro.textContent = "Turn this note into a web page anyone with the link can read.";
+
+    // A small browser window showing the note as the page will open.
+    const { title: pageTitle, line } = sharePreview(input.markdown, input.title);
+    const preview = el("div", "share-preview");
+    const chrome = el("div", "share-preview-bar");
+    chrome.append(el("i"), el("i"), el("i"));
+    const address = el("span");
+    address.textContent = shareHost();
+    chrome.append(address);
+    const page = el("div", "share-preview-page");
+    const heading = el("strong");
+    heading.textContent = pageTitle;
+    page.append(heading);
+    if (line) {
+      const first = el("p");
+      first.textContent = line;
+      page.append(first);
+    }
+    preview.append(chrome, page);
+
+    const info = el("p", "share-fine");
+    info.append(icon(Info));
+    info.append("Links stop working after 30 days and aren’t listed by search engines.");
+
+    children.push(
+      intro,
+      preview,
+      shareButton(shareBusy === "publish" ? "Sharing…" : "Share", "share-primary share-wide", () => runShare(doc, "publish")),
+      info,
+    );
+  } else {
+    const url = new URL(record.url);
+    const link = el("div", "share-link");
+    const host = el("span", "share-link-host");
+    host.textContent = url.host;
+    const path = el("span", "share-link-path");
+    path.textContent = url.pathname;
+    const copy = iconButton(Copy, "Copy link", async () => {
+      if (!(await copyLink(record.url))) return;
+      copy.replaceChildren(icon(Check));
+      window.setTimeout(() => copy.replaceChildren(icon(Copy)), 1400);
+    }, "icon-btn share-copy");
+    link.append(host, path, copy);
+
+    const update = shareRow(
+      RefreshCw,
+      shareBusy === "publish" ? "Updating…" : changed ? "Update page" : "Page is up to date",
+      changed ? "Has new changes" : `Shared ${shareDate(record.sharedAt)}`,
+      () => runShare(doc, "publish"),
+    );
+    update.classList.toggle("pending", changed);
+    const rows = el("div", "share-rows");
+    rows.append(update);
+    if (record.expiresAt) rows.append(shareRow(Clock, "Link expires", shareDate(record.expiresAt)));
+    rows.append(
+      shareRow(FileText, "View Markdown", "", () => openUrl(`${record.url}.md`).catch(() => {})),
+    );
+
+    const actions = el("div", "share-actions");
+    actions.append(
+      shareButton(shareBusy === "unshare" ? "Stopping…" : "Stop sharing", "share-secondary", () => stopSharing(doc)),
+      shareButton("View page", "share-primary", () => openUrl(record.url).catch(() => {})),
+    );
+    children.push(link, rows, actions);
+  }
+
+  if (error) {
+    const message = el("p", "share-error");
+    message.textContent = error;
+    children.push(message);
+  }
+  shareMenu.replaceChildren(...children);
+}
+
+async function stopSharing(doc: Doc) {
+  const confirmed = await ask("The link will stop working for anyone who has it.", {
+    title: "Stop sharing this note?",
+    kind: "warning",
+    okLabel: "Stop Sharing",
+    cancelLabel: "Cancel",
+  });
+  if (confirmed) await runShare(doc, "unshare");
+}
+
+async function runShare(doc: Doc, action: "publish" | "unshare") {
+  const input = shareInput(doc);
+  if (!input || shareBusy) return;
+  shareBusy = action;
+  await renderShareMenu();
+  let error = "";
+  try {
+    if (action === "unshare") {
+      await unshare(input.path);
+      toast("Sharing stopped");
+    } else {
+      const { record, skippedImages } = await publish(input);
+      const copied = await copyLink(record.url);
+      const note = skippedImages ? ` ${skippedImages === 1 ? "One image" : `${skippedImages} images`} couldn’t be included.` : "";
+      toast(`${copied ? "Link copied." : "Page is live."}${note}`, note ? 5000 : 2600);
+    }
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
+  shareBusy = null;
+  renderBar(doc.pane);
+  if (shareDoc === doc && !shareMenu.hidden) await renderShareMenu(error);
+}
+
+async function toggleShare(doc: Doc, anchor?: HTMLElement) {
+  if (!shareMenu.hidden && shareDoc === doc) return void (shareMenu.hidden = true);
+  appearanceMenu.hidden = true;
+  shareDoc = doc;
+  await renderShareMenu();
+  shareMenu.hidden = false;
+  const target = anchor ?? doc.pane.barEl.querySelector<HTMLElement>(".share-btn");
+  const rect = target?.getBoundingClientRect() ?? new DOMRect(window.innerWidth - 16, 40, 0, 0);
+  shareMenu.style.top = `${rect.bottom + 6}px`;
+  shareMenu.style.left = `${Math.max(8, rect.right - shareMenu.offsetWidth)}px`;
 }
 
 // ---------- updates ----------
@@ -1205,6 +1441,7 @@ const commands: Record<string, () => unknown> = {
   features: () => openGuide("features"),
   help: () => openGuide("help"),
   examples: () => openGuide("examples"),
+  share: () => focused.active && toggleShare(focused.active),
 };
 
 // A shortcut can arrive both as a keydown and as a native menu event; the
@@ -1264,7 +1501,7 @@ $("btn-close-folder").addEventListener("click", () => {
 });
 
 window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") appearanceMenu.hidden = true;
+  if (e.key === "Escape") appearanceMenu.hidden = shareMenu.hidden = true;
   const id = shortcut(e);
   if (!id) return;
   e.preventDefault();
@@ -1273,10 +1510,11 @@ window.addEventListener("keydown", (e) => {
 
 window.addEventListener("mousedown", (e) => {
   if (!appearanceMenu.hidden && !appearanceMenu.contains(e.target as Node)) appearanceMenu.hidden = true;
+  if (!shareMenu.hidden && !shareMenu.contains(e.target as Node)) shareMenu.hidden = true;
 });
 
 window.addEventListener("resize", () => {
-  appearanceMenu.hidden = true;
+  appearanceMenu.hidden = shareMenu.hidden = true;
   for (const pane of panes) if (pane.active?.mode === "source") autosizeSource(pane.active);
 });
 

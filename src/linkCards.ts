@@ -21,6 +21,9 @@ const MAX_STORED = 150;
 const stored: Record<string, Preview> = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
 const pending = new Map<string, Promise<Preview>>();
 
+/** The preview already fetched for a URL, if any; shared pages reuse it. */
+export const storedPreview = (url: string): Preview | undefined => stored[url];
+
 function fallback(url: string): Preview {
   const { hostname, origin } = new URL(url);
   return { title: url, description: "", image: "", site: hostname.replace(/^www\./, ""), icon: `${origin}/favicon.ico` };

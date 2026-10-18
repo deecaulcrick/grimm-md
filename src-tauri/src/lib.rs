@@ -248,6 +248,8 @@ fn build_menu(
         .item(&item("save", "Save", "CmdOrCtrl+S")?)
         .item(&item("save-as", "Save As…", "CmdOrCtrl+Shift+S")?)
         .separator()
+        .text("share", "Share…")
+        .separator()
         .item(&item("close-tab", "Close Tab", "CmdOrCtrl+W")?)
         .build()?;
     let edit = SubmenuBuilder::new(app, "Edit")
