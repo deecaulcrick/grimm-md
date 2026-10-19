@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag like v0.2.0 builds Grimm, signs the update, and publishes a
-# GitHub release. Installed copies find it through latest.json on that release.
+# Pushing a tag like v0.2.0 builds Grimm, signs it with the Developer ID
+# certificate, has Apple notarise it, signs the update, and publishes a GitHub
+# release. Installed copies find it through latest.json on that release.
 on:
   push:
     tags: ["v*"]
@@ -30,16 +31,41 @@ jobs:
 
       - run: npm ci
 
+      # codesign needs Apple's Developer ID intermediate to complete the
+      # certificate's chain; the .p12 carries only the certificate and its key.
+      - name: Install the Developer ID intermediate certificate
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          sudo security add-certificates -k /Library/Keychains/System.keychain "$RUNNER_TEMP/DeveloperIDG2CA.cer" || true
+
+      # The notarisation key has to be a file on disk.
+      - name: Write the App Store Connect API key
+        run: |
+          echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Signing: the Developer ID Application certificate, exported as a base64 .p12.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Notarisation: an App Store Connect API key (APPLE_API_KEY_PATH is set above).
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         with:
           tagName: v__VERSION__
           releaseName: Grimm v__VERSION__
           releaseBody: See the assets below to download and install this version.
           releaseDraft: false
           prerelease: false
-          # Update artifacts are only produced here, so local builds don't need the signing key.
-          args: --target universal-apple-darwin --config {"bundle":{"createUpdaterArtifacts":true}}
+          # Update artifacts and the Developer ID signature are only produced here, so
+          # local builds need neither key and stay ad-hoc signed. The identity must be
+          # part of the certificate's name; the team ID is, and has no spaces to split on.
+          args: >-
+            --target universal-apple-darwin
+            --config {"bundle":{"createUpdaterArtifacts":true,"macOS":{"signingIdentity":"GUYKRR7HTA"}}}
