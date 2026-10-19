@@ -38,10 +38,23 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
           sudo security add-certificates -k /Library/Keychains/System.keychain "$RUNNER_TEMP/DeveloperIDG2CA.cer" || true
 
-      # The notarisation key has to be a file on disk.
+      # The notarisation key has to be a file on disk. The secret may hold the
+      # .p8 as it is or base64-encoded, and pasting it can flatten its line
+      # breaks, so it is rebuilt as a proper PEM and checked before use.
       - name: Write the App Store Connect API key
         run: |
-          echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          key=$(printf '%s' "$APPLE_API_KEY_P8" | tr -d '\r')
+          if [ -z "$key" ]; then
+            echo "::error::The APPLE_API_KEY_P8 secret is empty"; exit 1
+          fi
+          if ! grep -q "BEGIN PRIVATE KEY" <<< "$key"; then
+            key=$(printf '%s' "$key" | tr -d ' \n\t' | base64 --decode)
+          fi
+          body=$(printf '%s' "$key" | sed -e 's/-----BEGIN PRIVATE KEY-----//' -e 's/-----END PRIVATE KEY-----//' | tr -d ' \n\t')
+          { echo "-----BEGIN PRIVATE KEY-----"; printf '%s\n' "$body" | fold -w 64; echo "-----END PRIVATE KEY-----"; } > "$RUNNER_TEMP/AuthKey.p8"
+          if ! openssl pkey -in "$RUNNER_TEMP/AuthKey.p8" -noout 2> /dev/null; then
+            echo "::error::APPLE_API_KEY_P8 isn't a .p8 private key. Set it to the contents of the AuthKey_*.p8 file from App Store Connect."; exit 1
+          fi
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
         env:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
