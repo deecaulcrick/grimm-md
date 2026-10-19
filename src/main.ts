@@ -40,6 +40,7 @@ import {
   FileText,
   FolderOpen,
   Globe,
+  History as HistoryIcon,
   Info,
   Palette,
   PanelLeft,
@@ -63,6 +64,7 @@ import welcomeGuide from "./guides/welcome.md?raw";
 import { imageTitles, imageUrl, saveImage } from "./images";
 import { codeLanguages, insertCodeBlock, renderPreview } from "./codeBlocks";
 import { DIAGRAM_LANGUAGE } from "./diagrams";
+import { closeHistory, historyOpen, openHistory, type Reason } from "./history";
 import { EMBED_LANGUAGE } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
 import { Outline } from "./outline";
@@ -110,8 +112,14 @@ interface Doc {
   // What the rich editor serializes an untouched document to; used to tell real
   // edits apart from the editor merely normalizing markdown on load.
   baseline: string;
+  // Hash of the file the text was last read from or written to, so a save
+  // never overwrites a newer file from outside (see write_file).
+  disk: string | null;
+  // A newer file from outside that arrived while there were unsaved edits.
+  conflict: { contents: string; hash: string } | null;
   pane: Pane;
   el: HTMLElement;
+  noticeEl: HTMLElement;
   editorEl: HTMLElement;
   sourceEl: HTMLTextAreaElement;
   prefs: NotePrefs;
@@ -314,8 +322,12 @@ function renderHead(pane: Pane) {
     crumbs.append(lock);
   }
 
-  const edited = el("span", "edited");
+  const edited = el(doc.path ? "button" : "span", "edited");
   edited.textContent = editedLabel(doc);
+  if (doc.path) {
+    edited.title = "Version history (⌥⌘Y)";
+    edited.addEventListener("click", () => showHistory(doc));
+  }
 
   const shared = Boolean(doc.path && shareRecord(doc.path));
   const share = el("button", "head-btn share-btn");
@@ -422,6 +434,7 @@ function render() {
     })),
   };
   localStorage.setItem("session", JSON.stringify(session));
+  watchOpenNotes();
 }
 
 function setFocused(pane: Pane) {
@@ -805,6 +818,8 @@ async function setMode(doc: Doc, next: Mode) {
 
 async function createDoc(pane: Pane, path: string | null, content: string, title: string | null = null): Promise<Doc> {
   const docEl = el("div", "doc");
+  const noticeEl = el("div", "doc-notice");
+  noticeEl.hidden = true;
   const page = el("div", "page");
   const editorEl = el("div", "editor");
   const sourceEl = el("textarea", "source");
@@ -812,7 +827,7 @@ async function createDoc(pane: Pane, path: string | null, content: string, title
   sourceEl.placeholder = "Start writing…";
   sourceEl.hidden = true;
   page.append(editorEl, sourceEl);
-  docEl.append(page);
+  docEl.append(noticeEl, page);
 
   const doc: Doc = {
     path,
@@ -822,8 +837,11 @@ async function createDoc(pane: Pane, path: string | null, content: string, title
     crepe: null,
     frontmatter: "",
     baseline: "",
+    disk: null,
+    conflict: null,
     pane,
     el: docEl,
+    noticeEl,
     editorEl,
     sourceEl,
     prefs: prefsFor(path),
@@ -874,7 +892,12 @@ async function createDoc(pane: Pane, path: string | null, content: string, title
 
 async function closeDoc(doc: Doc, confirm = true): Promise<boolean> {
   if (confirm) await autosave(doc);
-  if (confirm && doc.dirty) {
+  if (confirm && doc.conflict) {
+    activate(doc);
+    if (!(await confirmDiscard(`“${docName(doc)}” changed outside Grimm and your edits weren't saved over it. Close it anyway? Your edits stay in its version history.`, "Close"))) return false;
+  }
+  snapshot(doc, "edited");
+  if (confirm && doc.dirty && !doc.conflict) {
     activate(doc);
     if (!(await confirmDiscard(`“${docName(doc)}” has unsaved changes. Close it anyway?`, "Close"))) return false;
   }
@@ -907,8 +930,9 @@ async function openPath(
   if (existing) return into && existing.pane !== into ? moveDoc(existing, into) : activate(existing);
 
   let text: string;
+  let hash: string;
   try {
-    text = await invoke<string>("read_file", { path: p });
+    ({ contents: text, hash } = await invoke<{ contents: string; hash: string }>("open_note", { path: p }));
   } catch (err) {
     recents = recents.filter((r) => r !== p);
     localStorage.setItem("recents", JSON.stringify(recents));
@@ -921,7 +945,8 @@ async function openPath(
   if (!into && otherPane) pane = panes.find((candidate) => candidate !== focused) ?? createPane();
   // An untouched "Untitled" tab is replaced rather than left behind.
   const placeholder = pane.active && isPristine(pane.active) ? pane.active : null;
-  await createDoc(pane, p, text);
+  const doc = await createDoc(pane, p, text);
+  doc.disk = hash;
   if (placeholder) await closeDoc(placeholder, false);
   rememberRecent(p);
   render();
@@ -983,23 +1008,40 @@ async function openDialog() {
 // A note that lives in a file is written back shortly after the typing stops.
 // New notes have nowhere to go until they are saved once by hand.
 const AUTOSAVE_DELAY = 1200;
+// A longer pause in the writing keeps a version in the note's history. While
+// the typing goes on, the backend keeps one every few minutes as it saves.
+const PAUSE_DELAY = 30_000;
 const autosaveTimers = new WeakMap<Doc, number>();
+const pauseTimers = new WeakMap<Doc, number>();
 let autosaveFailed = false;
 
 function scheduleAutosave(doc: Doc) {
   if (!doc.path || !inTauri) return;
   window.clearTimeout(autosaveTimers.get(doc));
+  window.clearTimeout(pauseTimers.get(doc));
+  pauseTimers.set(doc, window.setTimeout(() => snapshot(doc, "edited"), PAUSE_DELAY));
+  // A newer file from outside is waiting on a choice; nothing is written until then.
+  if (doc.conflict) return;
   autosaveTimers.set(doc, window.setTimeout(() => autosave(doc), AUTOSAVE_DELAY));
+}
+
+/** Keeps the note's current text as a version in its history. */
+function snapshot(doc: Doc, reason: Reason) {
+  window.clearTimeout(pauseTimers.get(doc));
+  if (!doc.path || !inTauri) return;
+  invoke("snapshot_note", { path: doc.path, contents: getContent(doc), reason }).catch(() => {});
 }
 
 /** Writes a changed note to its file now. Does nothing for a note with no file yet. */
 async function autosave(doc: Doc) {
   window.clearTimeout(autosaveTimers.get(doc));
-  if (!doc.path || !doc.dirty || !inTauri) return;
+  if (!doc.path || !doc.dirty || doc.conflict || !inTauri) return;
   const contents = getContent(doc);
   try {
-    await invoke("write_file", { path: doc.path, contents });
+    doc.disk = await invoke<string>("write_file", { path: doc.path, contents, base: doc.disk });
   } catch (err) {
+    // The file changed outside Grimm; a "file-changed" event brings the new text.
+    if (err === "changed-on-disk") return;
     // Say so once, not on every keystroke; the dot on the tab stays until a save works.
     if (!autosaveFailed) toast(`Couldn't save ${docName(doc)}: ${err}`);
     autosaveFailed = true;
@@ -1028,13 +1070,20 @@ async function saveDocument(doc: Doc | null, saveAs = false) {
     if (!picked) return;
     target = picked;
   }
+  const sameFile = target === doc.path;
+  // A copy under a new name starts with the history of the note it came from.
+  if (doc.path && !sameFile) await invoke("copy_history", { from: doc.path, to: target });
   try {
-    await invoke("write_file", { path: target, contents: getContent(doc) });
+    // A file picked in the save dialog has been agreed to be replaced.
+    const base = sameFile ? doc.disk : null;
+    doc.disk = await invoke<string>("write_file", { path: target, contents: getContent(doc), base });
   } catch (err) {
-    toast(`Couldn't save: ${err}`);
+    if (err !== "changed-on-disk") toast(`Couldn't save: ${err}`);
     return;
   }
   window.clearTimeout(autosaveTimers.get(doc));
+  doc.conflict = null;
+  renderNotice(doc);
   doc.path = target;
   doc.title = null;
   doc.dirty = false;
@@ -1045,6 +1094,137 @@ async function saveDocument(doc: Doc | null, saveAs = false) {
   render();
   if (folderOf(target)) await refreshFolders();
   toast("Saved");
+}
+
+// ---------- outside changes ----------
+
+let watchedPaths = "";
+
+/** Tells the backend which files to watch for changes made outside Grimm. */
+function watchOpenNotes() {
+  if (!inTauri) return;
+  const paths = [...new Set(allDocs().flatMap((d) => (d.path ? [d.path] : [])))];
+  if (paths.join("\n") === watchedPaths) return;
+  watchedPaths = paths.join("\n");
+  invoke("watch_notes", { paths }).catch(() => {});
+}
+
+/** Swaps the text in a note's editor for new text that is already on disk. */
+async function replaceContent(doc: Doc, text: string) {
+  window.clearTimeout(autosaveTimers.get(doc));
+  const scroll = doc.el.scrollTop;
+  if (doc.mode === "source") {
+    doc.sourceEl.value = text;
+    autosizeSource(doc);
+  } else {
+    await mountRich(doc, text);
+  }
+  doc.el.scrollTop = scroll;
+  // The new editor may report its first render as an edit; it is not one.
+  window.clearTimeout(autosaveTimers.get(doc));
+  setDirty(doc, false);
+  if (doc.pane.active === doc) refreshOutline(doc.pane);
+  if (focused.active === doc) renderStats();
+}
+
+function renderNotice(doc: Doc) {
+  const conflict = doc.conflict;
+  doc.noticeEl.hidden = !conflict;
+  if (!conflict) return void doc.noticeEl.replaceChildren();
+  const text = el("p");
+  text.textContent = "This note was changed outside Grimm while you were editing it.";
+  const keep = el("button", "share-secondary");
+  keep.textContent = "Keep mine";
+  keep.title = "Save your edits over it. The other version stays in the note's history.";
+  keep.addEventListener("click", () => {
+    doc.disk = conflict.hash;
+    doc.conflict = null;
+    renderNotice(doc);
+    autosave(doc);
+  });
+  const reload = el("button", "share-primary");
+  reload.textContent = "Use the newer file";
+  reload.title = "Your edits stay in the note's history.";
+  reload.addEventListener("click", async () => {
+    if (doc.path) await invoke("snapshot_note", { path: doc.path, contents: getContent(doc), reason: "replaced" });
+    doc.disk = conflict.hash;
+    doc.conflict = null;
+    renderNotice(doc);
+    await replaceContent(doc, conflict.contents);
+  });
+  doc.noticeEl.replaceChildren(text, keep, reload);
+}
+
+/**
+ * A note's file was changed by something else. With nothing unsaved the new
+ * text simply replaces the old; otherwise saving stops until the reader picks one.
+ */
+async function outsideChange(change: { path: string; contents: string; hash: string }) {
+  const doc = allDocs().find((d) => d.path === change.path);
+  if (!doc) return;
+  if (change.contents === getContent(doc)) {
+    doc.disk = change.hash;
+    doc.conflict = null;
+    renderNotice(doc);
+    return setDirty(doc, false);
+  }
+  if (!doc.dirty) {
+    doc.disk = change.hash;
+    return replaceContent(doc, change.contents);
+  }
+  window.clearTimeout(autosaveTimers.get(doc));
+  doc.conflict = { contents: change.contents, hash: change.hash };
+  renderNotice(doc);
+}
+
+/** A note open in Grimm was renamed or moved in Finder; its tab follows. */
+function outsideRename({ from, to }: { from: string; to: string }) {
+  const doc = allDocs().find((d) => d.path === from);
+  if (!doc) return;
+  doc.path = to;
+  // Its star, settings and shared link come along, as with a rename in Grimm.
+  favorites = remapList(favorites, from, to);
+  localStorage.setItem("favorites", JSON.stringify(favorites));
+  recents = remapList(recents, from, to);
+  localStorage.setItem("recents", JSON.stringify(recents));
+  if (notePrefs[from]) {
+    notePrefs[to] = notePrefs[from];
+    delete notePrefs[from];
+    localStorage.setItem("notePrefs", JSON.stringify(notePrefs));
+  }
+  moveShare(from, to);
+  render();
+  refreshFolders();
+}
+
+// ---------- version history ----------
+
+async function showHistory(doc: Doc | null) {
+  if (!doc) return;
+  if (!inTauri) return toast("Version history needs the desktop app");
+  if (!doc.path) return toast("Version history starts once this note is saved");
+  appearanceMenu.hidden = shareMenu.hidden = true;
+  await openHistory({
+    name: docName(doc),
+    path: doc.path,
+    current: getContent(doc),
+    restore: async (hash, text, time) => {
+      if (!doc.path) return false;
+      try {
+        doc.disk = await invoke<string>("restore_version", { path: doc.path, current: getContent(doc), hash });
+      } catch (err) {
+        toast(`Couldn't restore that version: ${err}`);
+        return false;
+      }
+      doc.conflict = null;
+      renderNotice(doc);
+      activate(doc);
+      await replaceContent(doc, text);
+      const when = new Date(time).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+      toast(`Restored the version from ${when}. The text it replaced is in the history.`, 4000);
+      return true;
+    },
+  });
 }
 
 // ---------- sidebar ----------
@@ -1194,7 +1374,8 @@ async function relocate(from: string, to: string): Promise<boolean> {
   }
   if (rewritten !== null) {
     try {
-      await invoke("write_file", { path: to, contents: rewritten });
+      const written = await invoke<string>("write_file", { path: to, contents: rewritten });
+      if (doc) doc.disk = written;
     } catch (err) {
       toast(`Moved, but its image links couldn't be updated: ${err}`, 6000);
       rewritten = null;
@@ -1785,6 +1966,7 @@ function pageMenuItems(doc: Doc): MenuItem[][] {
 
   const page: MenuItem[] = [
     { label: record ? "Shared to web…" : "Share to web…", icon: record ? Globe : Share, run: () => toggleShare(doc) },
+    ...(doc.path ? [{ label: "Version history…", icon: HistoryIcon, hint: "⌥⌘Y", run: () => showHistory(doc) }] : []),
     {
       label: "Lock page",
       icon: Lock,
@@ -2361,6 +2543,7 @@ const commands: Record<string, () => unknown> = {
   share: () => focused.active && toggleShare(focused.active),
   "shared-pages": openSharedPages,
   search: focusSearch,
+  history: () => (historyOpen() ? closeHistory() : showHistory(focused.active)),
 };
 
 // A shortcut can arrive both as a keydown and as a native menu event; the
@@ -2508,6 +2691,8 @@ async function init() {
   await restoreSession(saved);
 
   await listen<string>("menu", ({ payload }) => run(payload));
+  await listen<{ path: string; contents: string; hash: string }>("file-changed", ({ payload }) => outsideChange(payload));
+  await listen<{ from: string; to: string }>("file-renamed", ({ payload }) => outsideRename(payload));
 
   await listen<string>("open-file", async ({ payload }) => {
     await invoke("take_pending_file");

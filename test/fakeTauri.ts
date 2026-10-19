@@ -40,6 +40,9 @@ export function installFakeTauri() {
     switch (cmd) {
       case "read_file":
         return a.path in fs.files ? fs.files[a.path] : fail("No such file or directory");
+      case "open_note":
+        if (!(a.path in fs.files)) fail("No such file or directory");
+        return { contents: fs.files[a.path], hash: `${fs.files[a.path].length}` };
       case "write_file":
         if (!isDir(dirOf(a.path))) fail("No such file or directory");
         fs.files[a.path] = a.contents;
@@ -84,6 +87,8 @@ export function installFakeTauri() {
           return `assets/${name}`;
         }
       }
+      case "list_versions":
+        return [];
       case "take_pending_file":
       case "allow_image":
         return null;
