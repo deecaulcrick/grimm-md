@@ -14,6 +14,19 @@ export interface Theme {
 }
 
 export const THEMES: Theme[] = [
+  // The light side of Graphite: neutral greys, soft graphite ink, a blue accent.
+  {
+    id: "paper",
+    name: "Paper",
+    scheme: "light",
+    bg: "#F6F6F5",
+    sidebar: "#ECECEA",
+    surface: "#FFFFFF",
+    text: "#232427",
+    accent: "#2F66D0",
+    button: "#232427",
+    onButton: "#F6F6F5",
+  },
   {
     id: "meadow",
     name: "Meadow",
@@ -26,31 +39,19 @@ export const THEMES: Theme[] = [
     button: "#2B8AE6",
     onButton: "#FFFFFF",
   },
-  // Low saturation, nothing competes with the words.
+  // Bear-style: a white page, soft charcoal text and a warm red accent.
   {
     id: "fog",
     name: "Fog",
     scheme: "light",
-    bg: "#ECEEEF",
-    sidebar: "#E0E3E5",
-    surface: "#F7F8F9",
-    text: "#1E2327",
-    accent: "#4F7185",
-    button: "#33424C",
-    onButton: "#F7F8F9",
-  },
-  // Bordeaux ink on a neutral, low-glare page.
-  {
-    id: "paper",
-    name: "Paper",
-    scheme: "light",
-    bg: "#FAF8F4",
-    sidebar: "#F0EDE6",
+    bg: "#FFFFFF",
+    sidebar: "#F3F3F2",
     surface: "#FFFFFF",
-    text: "#5B0015",
-    accent: "#4F86D0",
-    button: "#5B0015",
-    onButton: "#FAF8F4",
+    text: "#363636",
+    heading: "#262626",
+    accent: "#DD4C4F",
+    button: "#CF3337",
+    onButton: "#FFFFFF",
   },
   {
     id: "grimm",

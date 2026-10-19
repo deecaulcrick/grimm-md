@@ -39,7 +39,7 @@ Everything Grimm can do, in one place. Reopen this list any time from the **Help
 
 ## Appearance
 
-- **Six themes.** Meadow, Fog and Paper for the day; Grimm, Graphite and Nightshift for the night.
+- **Six themes.** Paper, Meadow and Fog for the day; Grimm, Graphite and Nightshift for the night. Paper and Graphite are a light and dark pair.
 - **Per-note layout.** Each note picks its own typeface (serif, sans or mono), text size and width from its **…** menu.
 - **Ink and highlighter.** Select text to colour it, highlight it, or both, from nine colours.
 - **Lock page.** Stops a note from being edited by accident.

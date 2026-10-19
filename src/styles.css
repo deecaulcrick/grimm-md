@@ -1,17 +1,17 @@
 :root {
   /* Base tokens; overwritten by the active theme (see themes.ts). */
-  --bg: #faf8f4;
-  --sidebar: #f0ede6;
+  --bg: #f6f6f5;
+  --sidebar: #ececea;
   --surface: #ffffff;
-  --text: #5b0015;
-  --accent: #80aee8;
-  --button: #5b0015;
-  --on-button: #faf8f4;
+  --text: #232427;
+  --accent: #2f66d0;
+  --button: #232427;
+  --on-button: #f6f6f5;
   --heading: var(--text);
 
   /* Everything else is derived, so a theme only needs the colours above. */
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
-  --marker: color-mix(in srgb, var(--accent) 78%, var(--text));
+  --marker: var(--accent);
   --text-2: color-mix(in srgb, var(--text) 72%, var(--bg));
   --text-3: color-mix(in srgb, var(--text) 50%, var(--bg));
   --border: color-mix(in srgb, var(--text) 13%, transparent);
@@ -2086,7 +2086,8 @@ body.resizing .toc {
   padding: 0;
 }
 
-.editor .milkdown .milkdown-list-item-block li .label-wrapper .checked svg {
+.editor .milkdown .milkdown-list-item-block li .label-wrapper .checked svg,
+.editor .milkdown .milkdown-list-item-block li .label-wrapper .bullet svg {
   fill: var(--marker);
 }
 
