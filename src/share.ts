@@ -20,6 +20,8 @@ export interface Appearance {
   font: string;
   size: string;
   width: string;
+  /** Grimm's drawings at the top of the page. */
+  illustrations: boolean;
 }
 
 export interface ShareInput {
@@ -115,7 +117,12 @@ export async function shareStatus(path: string): Promise<ShareStatus | null> {
   return status;
 }
 
-export const fingerprint = (input: ShareInput) => sha256(JSON.stringify([input.markdown, input.appearance]));
+export const fingerprint = (input: ShareInput) => {
+  // Drawings on is how pages were published before the setting existed, so
+  // leaving it out then keeps those pages from looking out of date.
+  const { illustrations, ...look } = input.appearance;
+  return sha256(JSON.stringify([input.markdown, illustrations ? look : input.appearance]));
+};
 
 class ShareError extends Error {
   constructor(

@@ -2569,6 +2569,7 @@ body.dragging-block .milkdown-block-handle {
 
 /* A miniature browser window showing how the page will open. */
 .share-preview {
+  position: relative;
   margin-bottom: 14px;
   border-radius: 10px;
   overflow: hidden;
@@ -2782,6 +2783,21 @@ button.share-row:hover:not(:disabled) {
 
 .share-row-label {
   flex: 1;
+}
+
+/* With the drawings on, the preview gets a corner of leaves like the page. */
+.share-preview-leaves {
+  position: absolute;
+  top: 22px;
+  right: -8px;
+  width: 74px;
+  height: auto;
+  pointer-events: none;
+}
+
+#share-menu > .share-toggle {
+  width: 100%;
+  margin-bottom: 10px;
 }
 
 .share-row-detail {

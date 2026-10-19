@@ -24,6 +24,7 @@ import {
   Star,
   ChevronDown,
   ChevronRight,
+  Leaf,
   SquarePen,
   ClipboardCopy,
   CopyPlus,
@@ -69,7 +70,7 @@ import { DIAGRAM_LANGUAGE } from "./diagrams";
 import { closeHistory, historyOpen, openHistory, type Reason } from "./history";
 import { EMBED_LANGUAGE } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
-import { emptySearchScene, tinyLeaf } from "./illustrations";
+import { cornerRightScene, emptySearchScene, tinyLeaf } from "./illustrations";
 import { showOnboarding, startHead, startPanel } from "./onboarding";
 import { Outline } from "./outline";
 import { anchorScroll } from "./scrollAnchor";
@@ -101,6 +102,8 @@ interface NotePrefs {
   size: DocSize;
   width: PageWidth;
   locked: boolean;
+  /** Whether the shared page shows Grimm's drawings around the note. */
+  illustrations: boolean;
 }
 
 interface Doc {
@@ -211,6 +214,7 @@ const prefsFor = (path: string | null): NotePrefs => ({
   size: docSize,
   width: pageWidth,
   locked: false,
+  illustrations: true,
   ...(path ? notePrefs[path] : undefined),
 });
 
@@ -2319,6 +2323,8 @@ async function duplicateDoc(doc: Doc) {
 // ---------- sharing ----------
 
 let shareDoc: Doc | null = null;
+// The page preview's own little corner of leaves, when the drawings are on.
+const PREVIEW_LEAVES = cornerRightScene({ className: "share-preview-leaves", fit: "xMaxYMin meet" });
 let shareBusy: "publish" | "unshare" | null = null;
 
 function shareInput(doc: Doc): ShareInput | null {
@@ -2327,7 +2333,13 @@ function shareInput(doc: Doc): ShareInput | null {
     path: doc.path,
     markdown: getContent(doc),
     title: docName(doc).replace(/\.[^.]+$/, ""),
-    appearance: { theme: theme.id, font: doc.prefs.font, size: doc.prefs.size, width: doc.prefs.width },
+    appearance: {
+      theme: theme.id,
+      font: doc.prefs.font,
+      size: doc.prefs.size,
+      width: doc.prefs.width,
+      illustrations: doc.prefs.illustrations,
+    },
   };
 }
 
@@ -2376,6 +2388,22 @@ function shareRow(node: IconNode, label: string, detail = "", onClick?: () => vo
     row.disabled = Boolean(shareBusy);
     row.addEventListener("click", onClick);
   }
+  return row;
+}
+
+/**
+ * Grimm's drawings at the top of the shared page, on or off for each note.
+ * Turning them off suits notes that should read plainly.
+ */
+function illustrationsRow(doc: Doc) {
+  const row = shareRow(Leaf, "Grimm illustrations", "", () => {
+    doc.prefs.illustrations = !doc.prefs.illustrations;
+    storePrefs(doc);
+    renderShareMenu();
+  });
+  row.classList.add("share-toggle");
+  row.title = "Leaves and flowers at the top of the page";
+  row.append(switchEl(doc.prefs.illustrations));
   return row;
 }
 
@@ -2438,9 +2466,13 @@ async function renderShareMenu(error = "") {
     info.append(icon(Info));
     info.append("Links stop working after 30 days and aren’t listed by search engines.");
 
+    preview.classList.toggle("decorated", doc.prefs.illustrations);
+    if (doc.prefs.illustrations) preview.insertAdjacentHTML("beforeend", PREVIEW_LEAVES);
+
     children.push(
       intro,
       preview,
+      illustrationsRow(doc),
       shareButton(shareBusy === "publish" ? "Sharing…" : "Share", "share-primary share-wide", () => runShare(doc, "publish")),
       info,
     );
@@ -2467,6 +2499,7 @@ async function renderShareMenu(error = "") {
     update.classList.toggle("pending", changed);
     const rows = el("div", "share-rows");
     rows.append(update);
+    rows.append(illustrationsRow(doc));
     if (record.expiresAt) rows.append(shareRow(Clock, "Link expires", shareDate(record.expiresAt)));
     rows.append(
       shareRow(FileText, "View Markdown", "", () => openUrl(`${record.url}.md`).catch(() => {})),
