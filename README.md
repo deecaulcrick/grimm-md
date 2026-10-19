@@ -30,27 +30,15 @@ The app opens with a short welcome note and a full feature list on first launch;
 
 ## Shortcuts
 
-| Shortcut | Action |
-| --- | --- |
-| ⌘N | New tab |
-| ⌘W | Close tab |
-| ⇧⌘] / ⇧⌘[ | Next / previous tab |
-| ⇧⌘\\ | Toggle split view |
-| ⌘O / ⇧⌘O | Open file / folder |
-| ⌘S / ⇧⌘S | Save / Save As |
-| ⌘/ | Toggle page ↔ Markdown source |
-| ⌘\\ | Toggle sidebar |
+| Shortcut   | Action                        |
+| ---------- | ----------------------------- |
+| ⌘N         | New tab                       |
+| ⌘W         | Close tab                     |
+| ⇧⌘] / ⇧⌘\[ | Next / previous tab           |
+| ⇧⌘\\       | Toggle split view             |
+| ⌘O / ⇧⌘O   | Open file / folder            |
+| ⌘S / ⇧⌘S   | Save / Save As                |
+| ⌘/         | Toggle page ↔ Markdown source |
+| ⌘\\        | Toggle sidebar                |
 
 ⌘-click a file in the sidebar to open it in the other pane.
-
-## Building from source
-
-Grimm is built with [Tauri](https://tauri.app) and [Milkdown](https://milkdown.dev). You need Node.js and a Rust toolchain.
-
-```sh
-npm install
-npm run tauri dev                      # run in development
-npm run tauri build -- --bundles app   # build Grimm.app
-```
-
-The built app lands in `src-tauri/target/release/bundle/macos/`. Themes live in `src/themes.ts`.
