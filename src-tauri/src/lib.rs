@@ -1,3 +1,4 @@
+mod git;
 mod history;
 mod watcher;
 
@@ -152,6 +153,21 @@ fn restore_version(
 #[tauri::command]
 fn copy_history(history: tauri::State<History>, from: String, to: String) {
     history.copy(&from, &to);
+}
+
+/// Where a note's git repository is and which of its files have uncommitted
+/// changes, or None for a note that isn't in one.
+#[tauri::command]
+async fn git_info(note: String, files: Vec<String>) -> Option<git::GitInfo> {
+    tauri::async_runtime::spawn_blocking(move || git::info(&note, &files)).await.ok().flatten()
+}
+
+/// Commits a note and the images it uses; returns the commit's short hash.
+#[tauri::command]
+async fn git_commit(note: String, files: Vec<String>, message: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || git::commit(&note, &files, &message))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -404,6 +420,7 @@ fn build_menu(
         .item(&item("save", "Save", "CmdOrCtrl+S")?)
         .item(&item("save-as", "Save As…", "CmdOrCtrl+Shift+S")?)
         .item(&item("history", "Version History…", "CmdOrCtrl+Alt+Y")?)
+        .item(&item("commit", "Commit…", "CmdOrCtrl+Alt+K")?)
         .separator()
         .text("share", "Share…")
         .text("shared-pages", "Shared Pages…")
@@ -490,6 +507,8 @@ pub fn run() {
             restore_version,
             copy_history,
             watch_notes,
+            git_info,
+            git_commit,
             list_markdown_files,
             fetch_page,
             save_image,
