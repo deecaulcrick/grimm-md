@@ -1,4 +1,4 @@
-<img src="app-icon.png" width="96" alt="Grimm icon">
+<img src="brand/readme-banner.jpg" alt="Grimm, a quiet Markdown editor for macOS">
 
 # Grimm
 
@@ -42,3 +42,14 @@ The app opens with a short welcome note and a full feature list on first launch;
 | ⌘\\        | Toggle sidebar                |
 
 ⌘-click a file in the sidebar to open it in the other pane.
+
+## Brand
+
+The icon, the onboarding drawings and the share pages all come from one set of hand-drawn shapes in [src/illustrations.ts](src/illustrations.ts), in Grimm's palette:
+
+| Orange    | Navy      | Green     | Yellow    | Lavender  | Sky       | Cream     |
+| --------- | --------- | --------- | --------- | --------- | --------- | --------- |
+| `#E8502A` | `#22385A` | `#1F9446` | `#F6A821` | `#8B8FD9` | `#BEE4E9` | `#F6EFDF` |
+
+`npm run brand` redraws the app icon (and every size Tauri needs), the in-app mark, the share server's link preview, and the files in [brand/](brand): the social card, the README banner, the DMG background and a sticker.
+

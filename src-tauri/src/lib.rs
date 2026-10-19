@@ -455,6 +455,7 @@ fn build_menu(
     let help = SubmenuBuilder::new(app, "Help")
         .text("help", "Grimm Help")
         .separator()
+        .text("onboarding", "Welcome Screen")
         .text("welcome", "Welcome to Grimm")
         .text("features", "Features")
         .text("examples", "Examples")

@@ -69,6 +69,8 @@ import { DIAGRAM_LANGUAGE } from "./diagrams";
 import { closeHistory, historyOpen, openHistory, type Reason } from "./history";
 import { EMBED_LANGUAGE } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
+import { emptySearchScene, tinyLeaf } from "./illustrations";
+import { showOnboarding, startHead, startPanel } from "./onboarding";
 import { Outline } from "./outline";
 import { anchorScroll } from "./scrollAnchor";
 import { installTableDrag } from "./tableDrag";
@@ -138,6 +140,8 @@ interface Pane {
   barEl: HTMLElement;
   headEl: HTMLElement;
   bodyEl: HTMLElement;
+  /** Shown in place of a note when the pane has none open. */
+  startEl: HTMLElement;
   outline: Outline;
 }
 
@@ -426,7 +430,7 @@ function wordCount(doc: Doc): string {
 
 function renderStats() {
   const doc = focused.active;
-  if (!doc) return;
+  if (!doc) return void (docStats.textContent = "");
   docStats.textContent = wordCount(doc);
 }
 
@@ -517,8 +521,9 @@ function createPane(): Pane {
   }
   panesEl.append(paneEl);
   const outline = new Outline();
-  bodyEl.append(outline.el);
-  const pane: Pane = { docs: [], active: null, el: paneEl, barEl, headEl, bodyEl, outline };
+  const startEl = el("div", "pane-start");
+  bodyEl.append(outline.el, startEl);
+  const pane: Pane = { docs: [], active: null, el: paneEl, barEl, headEl, bodyEl, startEl, outline };
   paneEl.addEventListener("mousedown", () => setFocused(pane), true);
   paneEl.addEventListener("focusin", () => setFocused(pane));
   panes.push(pane);
@@ -546,15 +551,15 @@ function attach(doc: Doc, pane: Pane, index = pane.docs.length) {
   pane.bodyEl.append(doc.el);
 }
 
-/** Makes sure a pane that just lost a tab still shows something, or goes away. */
+/** A pane that just lost its last tab goes away, unless it is the only one. */
 async function settlePane(pane: Pane) {
-  if (pane.active) showActive(pane);
-  else if (panes.length > 1) removePane(pane);
-  else await createDoc(pane, null, "");
+  if (!pane.active && panes.length > 1) removePane(pane);
+  else showActive(pane);
 }
 
 function showActive(pane: Pane) {
   for (const doc of pane.docs) doc.el.hidden = doc !== pane.active;
+  renderStart(pane);
   if (pane.active?.mode === "source") autosizeSource(pane.active);
   refreshOutline(pane);
 }
@@ -675,11 +680,13 @@ function dropTab(doc: Doc, pane: Pane, index: number) {
 }
 
 async function toggleSplit() {
+  // Splitting an empty window would only show the start view twice.
+  if (panes.length < MAX_PANES && !focused.docs.length) return;
   if (panes.length < MAX_PANES) {
     const source = focused;
     const pane = createPane();
     if (source.docs.length > 1 && source.active) await moveDoc(source.active, pane);
-    else await createDoc(pane, null, "");
+    else showActive(pane);
     return;
   }
   const [first, second] = panes;
@@ -893,6 +900,8 @@ async function createDoc(pane: Pane, path: string | null, content: string, title
   });
 
   attach(doc, pane);
+  // The empty pane greets the reader as a welcome until their first note.
+  localStorage.setItem("welcomed", "1");
   await mountRich(doc, content);
   activate(doc);
   return doc;
@@ -983,11 +992,50 @@ async function openGuide(id: keyof typeof GUIDES) {
   render();
 }
 
-/** The first time Grimm runs, it opens on the welcome note with the feature list beside it. */
-async function welcome() {
-  if (localStorage.getItem("welcomed")) return;
-  localStorage.setItem("welcomed", "1");
-  if (allDocs().some((d) => !isPristine(d))) return;
+const START_ACTIONS = {
+  tour: openTour,
+  openFolder: openFolderDialog,
+  openFile: openDialog,
+  write: () => newDocument(),
+};
+
+/**
+ * An empty pane shows the ways in, with the files opened most recently below
+ * them. The first time Grimm runs, this is the welcome.
+ */
+function renderStart(pane: Pane) {
+  const empty = !pane.docs.length;
+  pane.startEl.hidden = !empty;
+  if (!empty) return void pane.startEl.replaceChildren();
+  const first = !localStorage.getItem("welcomed");
+  const head = first
+    ? startHead("Welcome to Grimm", "A quiet place to write Markdown. Your notes stay plain <code>.md</code> files on your own disk.")
+    : startHead("Nothing open", "Start a note, or open one you already have.");
+  const column = el("div", "start-column");
+  column.append(head, startPanel(START_ACTIONS));
+  const recent = recents.slice(0, 5);
+  if (recent.length && !first) {
+    const list = el("ul", "start-recents");
+    for (const p of recent) {
+      const item = el("li");
+      const button = el("button");
+      button.append(icon(FileText), Object.assign(el("span", "name"), { textContent: basename(p) }), Object.assign(el("span", "where"), { textContent: tildify(dirname(p)) }));
+      button.addEventListener("click", () => openPath(p, { pane }));
+      item.append(button);
+      list.append(item);
+    }
+    column.append(Object.assign(el("h2", "start-label"), { textContent: "Recent" }), list);
+  }
+  pane.startEl.replaceChildren(column);
+}
+
+/** The welcome screen over the whole window, from the Help menu. */
+function showWelcomeScreen() {
+  showOnboarding(START_ACTIONS);
+}
+
+/** The welcome note with the feature list beside it. */
+async function openTour() {
   await openGuide("features");
   await openGuide("welcome");
   const pane = focused;
@@ -2014,9 +2062,10 @@ function renderAppearance() {
     preview.style.background = t.bg;
     preview.style.color = t.text;
     preview.textContent = "Aa";
-    const dot = el("i");
-    dot.style.background = t.accent;
-    preview.append(dot);
+    // The theme's accent as a little painted leaf.
+    const mark = el("i");
+    mark.innerHTML = tinyLeaf(t.accent);
+    preview.append(mark);
     const name = el("span", "tile-name");
     name.textContent = t.name;
     tile.append(preview, name);
@@ -2705,6 +2754,7 @@ const commands: Record<string, () => unknown> = {
   quit: () => inTauri && getCurrentWindow().close(),
   "check-updates": () => checkForUpdates(true),
   welcome: () => openGuide("welcome"),
+  onboarding: showWelcomeScreen,
   features: () => openGuide("features"),
   help: () => openGuide("help"),
   examples: () => openGuide("examples"),
@@ -2756,6 +2806,8 @@ function shortcut(e: KeyboardEvent): string | null {
 }
 
 // ---------- wiring ----------
+
+$("search-empty").insertAdjacentHTML("afterbegin", emptySearchScene());
 
 createIcons({
   icons: { ChevronDown, CircleQuestionMark, Ellipsis, FileText, FolderOpen, Palette, PanelLeft, Search, SquarePen, X },
@@ -2854,9 +2906,9 @@ async function init() {
   // Read before the first document exists: creating it saves the (empty) session over this one.
   const saved: Session | null = JSON.parse(localStorage.getItem("session") ?? "null");
   focused = createPane();
-  await createDoc(focused, null, "");
+  showActive(focused);
 
-  if (!inTauri) return void (await welcome());
+  if (!inTauri) return;
 
   await restoreSession(saved);
 
@@ -2898,7 +2950,6 @@ async function init() {
 
   const pending = await invoke<string | null>("take_pending_file");
   if (pending) await openPath(pending);
-  else await welcome();
   await refreshFolders();
   checkForUpdates();
 }

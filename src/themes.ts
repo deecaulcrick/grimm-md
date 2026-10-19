@@ -53,17 +53,20 @@ export const THEMES: Theme[] = [
     button: "#CF3337",
     onButton: "#FFFFFF",
   },
+  // Grimm's own colours: flat blacks (a base, and a deeper one for what sits on
+  // it), green marks and orange in the icon.
   {
     id: "grimm",
     name: "Grimm",
     scheme: "dark",
-    bg: "#002428",
-    sidebar: "#083830",
-    surface: "#17604F",
-    text: "#F4EFD6",
-    accent: "#F8E347",
-    button: "#F8E347",
-    onButton: "#002428",
+    bg: "#2F2F2F",
+    sidebar: "#242424",
+    surface: "#242424",
+    text: "#E8E4DA",
+    heading: "#BEE4E9",
+    accent: "#3DB56A",
+    button: "#1F9446",
+    onButton: "#FFFFFF",
   },
   // Neutral dark; softened text avoids halation.
   {
