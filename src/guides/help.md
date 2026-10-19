@@ -14,9 +14,13 @@ Three other notes come with Grimm, all in the **Help** menu:
 
 **Do I need to save?** Only once. A new note lives in its tab until you save it with ⌘S and choose where it goes. From then on Grimm saves it for you a moment after you stop typing, and again when you close it or switch away from the app.
 
-**How do I work with a whole folder?** Press ⇧⌘O and pick it. Its Markdown files appear in the sidebar, including those in subfolders. Close the folder with the × beside its name.
+**How do I work with a whole folder?** Press ⇧⌘O and pick it. Its Markdown files appear in the sidebar, including those in subfolders. You can open several, or make a new one, with the **+** beside *Folders*. Click a folder to fold or unfold it; hover it for **+** to start a note inside and **…** for more, including *Remove from sidebar*.
 
-**How do I know a note is unsaved?** Its tab shows a dot, and the status bar says *Edited*. For a note that has a file, the dot clears by itself within a second or two. Grimm asks before closing a new note that has never been saved.
+**How do I rename a note?** Double-click its name in the note's header, or use *Rename* in its **…** menu or its sidebar row's **…**. The file on disk is renamed; its star, settings and shared link stay with it.
+
+**How do I move a note to another folder?** Drag it onto a folder in the sidebar, or use *Move to…* in its **…** menu. Images it uses are copied into the new folder's `assets` and its links updated; the originals stay where they were, since other notes may use them.
+
+**How do I know a note is unsaved?** Its tab shows a dot, and the note's header says *Edited just now*. For a note that has a file, the dot clears by itself within a second or two. Grimm asks before closing a new note that has never been saved.
 
 **Where do uploaded images go?** Into a folder called `assets`, next to the note. The note links to them by a relative path, so keep the folder with the note when you move it. A new note has to be saved before a picture can be uploaded into it, and Grimm asks you to do that first.
 
@@ -55,9 +59,13 @@ Three other notes come with Grimm, all in the **Help** menu:
 
 ## Appearance
 
-**How do I change the theme or font?** Click the palette icon at the top right. Your choices are remembered.
+**How do I change the theme?** Click the palette icon at the bottom of the sidebar. The theme applies to every note.
 
-**Can the text run the full width of the window?** Yes. In the same menu, set Page width to Full width.
+**How do I change a note's font or text size?** Click **…** in the note's header; the font, text size and width are at the top of that menu. Each note keeps its own.
+
+**Can the text run the full width of the window?** Yes. In the same menu, turn on *Full width*.
+
+**How do I colour or highlight text?** Select it and click the **A** in the menu that appears. Pick an ink for the text, a highlighter colour, or both.
 
 ## Troubleshooting
 

@@ -58,10 +58,61 @@ export const shareRecord = (path: string): ShareRecord | null => {
   return record && (record.expiresAt === null || record.expiresAt > Date.now()) ? record : null;
 };
 
+/** Keeps a note's link when the note is renamed or moved: the record follows its path. */
+export function moveShare(from: string, to: string) {
+  if (!records[from]) return;
+  records[to] = records[from];
+  delete records[from];
+  persist();
+}
+
 async function sha256(data: string | ArrayBuffer): Promise<string> {
   const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export interface SharedPage {
+  path: string;
+  record: ShareRecord;
+}
+
+/** Every note this Mac has shared whose link has not expired, newest first. */
+export function sharedPages(): SharedPage[] {
+  return Object.keys(records)
+    .flatMap((path) => {
+      const record = shareRecord(path);
+      return record ? [{ path, record }] : [];
+    })
+    .sort((a, b) => b.record.sharedAt - a.record.sharedAt);
+}
+
+export interface ShareStatus {
+  status: "live" | "expired" | "removed" | "missing";
+  title: string;
+  updatedAt: number;
+  expiresAt: number | null;
+}
+
+/**
+ * Asks the server about a shared note. A link that no longer works is
+ * forgotten here too. Null means the server could not be reached.
+ */
+export async function shareStatus(path: string): Promise<ShareStatus | null> {
+  const record = records[path];
+  if (!record) return null;
+  let status: ShareStatus;
+  try {
+    status = await request<ShareStatus>("GET", `/api/shares/${record.id}`, undefined, record.token);
+  } catch (error) {
+    if (!(error instanceof ShareError && error.status === 404)) return null;
+    status = { status: "missing", title: "", updatedAt: 0, expiresAt: null };
+  }
+  if (status.status !== "live") {
+    delete records[path];
+    persist();
+  }
+  return status;
 }
 
 export const fingerprint = (input: ShareInput) => sha256(JSON.stringify([input.markdown, input.appearance]));

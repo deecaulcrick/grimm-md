@@ -11,16 +11,31 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import {
   ArrowRightLeft,
   Check,
+  FolderInput,
+  PenLine,
+  Folder,
+  FolderPlus,
+  Star,
+  ChevronDown,
+  ChevronRight,
+  SquarePen,
+  ClipboardCopy,
+  CopyPlus,
+  Ellipsis,
+  Link2,
+  Lock,
+  Search,
   CircleQuestionMark,
   Clock,
   Code,
   Copy,
+  ExternalLink,
   Columns2,
   FileText,
   FolderOpen,
@@ -31,6 +46,7 @@ import {
   Plus,
   RefreshCw,
   Share,
+  Trash2,
   X,
   createElement,
   createIcons,
@@ -39,7 +55,7 @@ import {
 
 import { blockDrag } from "./blockDrag";
 import { codeTheme } from "./codeTheme";
-import { blockEditIcons, diagramIcon, embedIcon, imageBlockConfig, tableIcons, toolbarIcons } from "./editorIcons";
+import { blockEditIcons, codeBlockIcons, diagramIcon, embedIcon, imageBlockConfig, tableIcons } from "./editorIcons";
 import examplesGuide from "./guides/examples.md?raw";
 import featuresGuide from "./guides/features.md?raw";
 import helpGuide from "./guides/help.md?raw";
@@ -50,15 +66,36 @@ import { DIAGRAM_LANGUAGE } from "./diagrams";
 import { EMBED_LANGUAGE } from "./htmlEmbed";
 import { linkCards } from "./linkCards";
 import { Outline } from "./outline";
+import { anchorScroll } from "./scrollAnchor";
 import { installTableDrag } from "./tableDrag";
-import { fingerprint, publish, shareHost, shareRecord, unshare, type ShareInput } from "./share";
+import { fingerprint, moveShare, publish, sharedPages, shareHost, shareRecord, shareStatus, unshare, type ShareInput } from "./share";
+import {
+  dirOf,
+  localImageRefs,
+  movedPath,
+  nameProblem,
+  remapList,
+  renamedPath,
+  resolveRelative,
+  rewriteImageRefs,
+} from "./notePaths";
 import { taskShortcut } from "./taskShortcut";
+import { selectionToolbar } from "./selectionToolbar";
+import { configureTextColor, textColor } from "./textColor";
 import { THEMES, applyTheme, findTheme, type Theme } from "./themes";
 
 type Mode = "rich" | "source";
 type DocFont = "serif" | "sans" | "mono";
 type PageWidth = "centered" | "full";
 type DocSize = "small" | "normal" | "large";
+
+/** How one note looks and behaves; each note keeps its own, like a Notion page. */
+interface NotePrefs {
+  font: DocFont;
+  size: DocSize;
+  width: PageWidth;
+  locked: boolean;
+}
 
 interface Doc {
   path: string | null;
@@ -77,6 +114,9 @@ interface Doc {
   el: HTMLElement;
   editorEl: HTMLElement;
   sourceEl: HTMLTextAreaElement;
+  prefs: NotePrefs;
+  // When the file was last written, for the "Edited" label.
+  modified: number | null;
 }
 
 interface Pane {
@@ -84,6 +124,7 @@ interface Pane {
   active: Doc | null;
   el: HTMLElement;
   barEl: HTMLElement;
+  headEl: HTMLElement;
   bodyEl: HTMLElement;
   outline: Outline;
 }
@@ -108,12 +149,32 @@ const docPath = $("doc-path");
 const docStats = $("doc-stats");
 const appearanceMenu = $("appearance");
 const shareMenu = $("share-menu");
+const sharedPagesEl = $("shared-pages");
+const sidebarEl = $("sidebar");
+const sideSearch = $<HTMLInputElement>("side-search");
 const toastEl = $("toast");
 
 const panes: Pane[] = [];
 let focused: Pane;
-let folder: string | null = localStorage.getItem("folder");
-let folderFiles: string[] = [];
+// Every folder open in the sidebar, each with its Markdown files. The one
+// folder older versions kept is carried over.
+let folders: string[] = JSON.parse(localStorage.getItem("folders") ?? "null") ?? [localStorage.getItem("folder")].filter(Boolean);
+const folderFiles = new Map<string, string[]>();
+// Folders and subfolders shown expanded in the sidebar. Open folders start out
+// expanded, subfolders folded.
+const openDirs = new Set<string>(JSON.parse(localStorage.getItem("openDirs") ?? "null") ?? folders);
+// Sidebar sections (Favorites, Folders, Shared, Recents) folded away by their header.
+const collapsedSections = new Set<string>(JSON.parse(localStorage.getItem("collapsedSections") ?? "[]"));
+let favorites: string[] = JSON.parse(localStorage.getItem("favorites") ?? "[]");
+const saveFolders = () => {
+  localStorage.setItem("folders", JSON.stringify(folders));
+  localStorage.setItem("openDirs", JSON.stringify([...openDirs]));
+  localStorage.removeItem("folder");
+  localStorage.removeItem("collapsedFolders");
+};
+/** The open folder a path is inside, the deepest one if folders nest. */
+const folderOf = (p: string) =>
+  folders.filter((f) => p.startsWith(`${f}/`) || p.startsWith(`${f}\\`)).sort((a, b) => b.length - a.length)[0] ?? null;
 let recents: string[] = JSON.parse(localStorage.getItem("recents") ?? "[]");
 let theme: Theme =
   findTheme(localStorage.getItem("theme")) ??
@@ -124,6 +185,17 @@ let docFont: DocFont = DOC_FONTS.find((f) => f === localStorage.getItem("font"))
 const DOC_SIZES: DocSize[] = ["small", "normal", "large"];
 let docSize: DocSize = DOC_SIZES.find((size) => size === localStorage.getItem("fontSize")) ?? "normal";
 let pageWidth: PageWidth = localStorage.getItem("pageWidth") === "full" ? "full" : "centered";
+
+// Per-note settings by file path. Notes without any use the old app-wide
+// choices above, so nothing changes for notes that were set up before.
+const notePrefs: Record<string, NotePrefs> = JSON.parse(localStorage.getItem("notePrefs") ?? "{}");
+const prefsFor = (path: string | null): NotePrefs => ({
+  font: docFont,
+  size: docSize,
+  width: pageWidth,
+  locked: false,
+  ...(path ? notePrefs[path] : undefined),
+});
 
 // ---------- helpers ----------
 
@@ -173,7 +245,14 @@ function renderBar(pane: Pane) {
   const last = panes[panes.length - 1] === pane;
   const children: HTMLElement[] = [];
 
-  if (first) children.push(iconButton(PanelLeft, "Toggle sidebar (⌘\\)", toggleSidebar));
+  // With the sidebar closed its toggle and the new-note button move into the
+  // first tab bar; hovering the toggle peeks at the sidebar.
+  if (first && app.classList.contains("sidebar-collapsed")) {
+    const toggle = iconButton(PanelLeft, "Open sidebar (⌘\\)", toggleSidebar, "icon-btn sidebar-toggle");
+    toggle.addEventListener("mouseenter", () => peekSidebar(true));
+    toggle.addEventListener("mouseleave", () => peekSidebar(false));
+    children.push(toggle, iconButton(SquarePen, "New note (⌘N)", () => newDocument(pane)));
+  }
 
   const tabs = el("div", "tabs");
   tabs.setAttribute("data-tauri-drag-region", "");
@@ -183,7 +262,7 @@ function renderBar(pane: Pane) {
     tab.classList.toggle("dirty", doc.dirty);
     tab.title = doc.path ? tildify(doc.path) : "Untitled";
     const name = el("span", "tab-name");
-    name.textContent = docName(doc);
+    name.textContent = displayName(doc);
     const close = el("button", "tab-close");
     close.title = "Close tab (⌘W)";
     close.append(icon(X));
@@ -191,7 +270,7 @@ function renderBar(pane: Pane) {
       e.stopPropagation();
       closeDoc(doc);
     });
-    tab.append(name, close);
+    tab.append(icon(FileText), name, close);
     tab.addEventListener("click", () => tabDragged || activate(doc));
     tab.addEventListener("pointerdown", (e) => startTabDrag(e, doc, tab));
     tab.addEventListener("auxclick", (e) => e.button === 1 && closeDoc(doc));
@@ -200,63 +279,136 @@ function renderBar(pane: Pane) {
   tabs.append(iconButton(Plus, "New document (⌘N)", () => newDocument(pane), "icon-btn tab-new"));
   children.push(tabs);
 
-  const actions = el("div", "pane-actions");
-  const doc = pane.active;
-  if (doc) {
-    const shared = Boolean(doc.path && shareRecord(doc.path));
-    const share = iconButton(shared ? Globe : Share, shared ? "Shared to web" : "Share to web", (e) => {
-      e.stopPropagation();
-      toggleShare(doc, e.currentTarget as HTMLElement);
-    }, "icon-btn share-btn");
-    share.classList.toggle("on", shared);
-    actions.append(share);
-    const source = iconButton(Code, "Markdown source (⌘/)", () =>
-      setMode(doc, doc.mode === "rich" ? "source" : "rich"),
-    );
-    source.classList.toggle("on", doc.mode === "source");
-    actions.append(source);
-    if (panes.length > 1) {
-      actions.append(
-        iconButton(ArrowRightLeft, "Move tab to the other pane", () => {
-          const target = panes.find((p) => p !== pane);
-          if (target) moveDoc(doc, target);
-        }),
-      );
-    }
-  }
   if (last) {
+    const actions = el("div", "pane-actions");
     const split = iconButton(Columns2, panes.length > 1 ? "Close split (⇧⌘\\)" : "Split view (⇧⌘\\)", toggleSplit);
     split.classList.toggle("on", panes.length > 1);
-    actions.append(
-      split,
-      iconButton(Palette, "Appearance", (e) => {
-        e.stopPropagation();
-        toggleAppearance(e.currentTarget as HTMLElement);
-      }),
-    );
+    actions.append(split);
+    children.push(actions);
   }
-  children.push(actions);
 
   pane.barEl.replaceChildren(...children);
+  renderHead(pane);
+}
+
+/** The note's own header: where it lives, when it was edited, Share and its menu. */
+function renderHead(pane: Pane) {
+  // Not while its name is being edited, or the edit would be thrown away.
+  if (pane.headEl.contains(document.activeElement) && document.activeElement?.matches(".rename-input")) return;
+  const doc = pane.active;
+  if (!doc) return pane.headEl.replaceChildren();
+
+  const crumbs = el("nav", "crumbs");
+  for (const part of crumbParts(doc)) {
+    if (crumbs.childElementCount) crumbs.append(Object.assign(el("span", "crumb-sep"), { textContent: "/" }));
+    crumbs.append(Object.assign(el("span", "crumb"), { textContent: part }));
+  }
+  const title = crumbs.querySelector<HTMLElement>(".crumb:last-of-type");
+  if (title) {
+    title.title = "Double-click to rename";
+    title.addEventListener("dblclick", () => renameDoc(doc));
+  }
+  if (doc.prefs.locked) {
+    const lock = icon(Lock);
+    lock.classList.add("crumb-lock");
+    crumbs.append(lock);
+  }
+
+  const edited = el("span", "edited");
+  edited.textContent = editedLabel(doc);
+
+  const shared = Boolean(doc.path && shareRecord(doc.path));
+  const share = el("button", "head-btn share-btn");
+  share.classList.toggle("on", shared);
+  share.append(icon(shared ? Globe : Share), Object.assign(el("span"), { textContent: shared ? "Shared" : "Share" }));
+  share.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleShare(doc, share);
+  });
+
+  const more = iconButton(Ellipsis, "Page options", (e) => {
+    e.stopPropagation();
+    togglePageMenu(doc, e.currentTarget as HTMLElement);
+  }, "icon-btn more-btn");
+  more.classList.toggle("on", !pageMenu.hidden && menuDoc === doc);
+
+  const items: HTMLElement[] = [crumbs, el("div", "head-gap"), edited, share];
+  if (doc.path) {
+    const path = doc.path;
+    const starred = favorites.includes(path);
+    const star = iconButton(Star, starred ? "Remove from Favorites" : "Add to Favorites", () => toggleFavorite(path), "icon-btn star-btn");
+    star.classList.toggle("starred", starred);
+    items.push(star);
+  }
+  pane.headEl.replaceChildren(...items, more);
+}
+
+const stripExtension = (name: string) => name.replace(/\.(md|markdown|mdx|mdown)$/i, "");
+const displayName = (doc: Doc) => stripExtension(docName(doc));
+
+/** The folders above a note (from the open folder it is in, or just its own), then its name. */
+function crumbParts(doc: Doc): string[] {
+  if (!doc.path) return [displayName(doc)];
+  const dir = dirname(doc.path);
+  const root = folderOf(doc.path);
+  const parts = root ? [basename(root), ...dir.slice(root.length).split(/[\\/]/).filter(Boolean)] : [basename(dir)];
+  return [...parts, displayName(doc)];
+}
+
+const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" });
+
+function timeAgo(ms: number): string {
+  const seconds = (Date.now() - ms) / 1000;
+  if (seconds < 60) return "just now";
+  const steps: [number, Intl.RelativeTimeFormatUnit][] = [
+    [60, "minute"],
+    [3600, "hour"],
+    [86400, "day"],
+    [604800, "week"],
+    [2629800, "month"],
+    [31557600, "year"],
+  ];
+  let unit = steps[0];
+  for (const step of steps) if (seconds >= step[0]) unit = step;
+  return relative.format(-Math.floor(seconds / unit[0]), unit[1]);
+}
+
+function editedLabel(doc: Doc): string {
+  if (!doc.path) return doc.title ? "" : "Not saved yet";
+  if (doc.dirty) return "Edited just now";
+  return doc.modified ? `Edited ${timeAgo(doc.modified)}` : "";
+}
+
+/** "Today at 10:34", "Yesterday at 10:34" or the date, as Notion's menu shows it. */
+function editedAt(ms: number): string {
+  const date = new Date(ms);
+  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(ms).setHours(0, 0, 0, 0)) / 86400000);
+  if (days === 0) return `Today at ${time}`;
+  if (days === 1) return `Yesterday at ${time}`;
+  return `${date.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })} at ${time}`;
 }
 
 function renderFocus() {
   for (const pane of panes) pane.el.classList.toggle("focused", pane === focused);
   const doc = focused.active;
   const name = doc ? docName(doc) : "Grimm";
-  docPath.textContent = doc?.path ? tildify(doc.path) : "Not saved yet";
+  docPath.textContent = doc?.path ? tildify(doc.path) : "";
   document.title = name;
   if (inTauri) getCurrentWindow().setTitle(name).catch(() => {});
   renderStats();
 }
 
+function wordCount(doc: Doc): string {
+  const text = getContent(doc).replace(FRONTMATTER, "");
+  const words = text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0;
+  return `${words.toLocaleString()} ${words === 1 ? "word" : "words"}`;
+}
+
 function renderStats() {
   const doc = focused.active;
   if (!doc) return;
-  const text = getContent(doc).replace(FRONTMATTER, "");
-  const words = text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0;
-  const count = `${words.toLocaleString()} ${words === 1 ? "word" : "words"}`;
-  docStats.textContent = doc.dirty ? `Edited  ·  ${count}` : count;
+  docStats.textContent = wordCount(doc);
 }
 
 function render() {
@@ -327,8 +479,9 @@ function createPane(): Pane {
   const paneEl = el("section", "pane");
   const barEl = el("header", "pane-bar");
   barEl.setAttribute("data-tauri-drag-region", "");
+  const headEl = el("div", "page-head");
   const bodyEl = el("div", "pane-body");
-  paneEl.append(barEl, bodyEl);
+  paneEl.append(barEl, headEl, bodyEl);
   if (panes.length) {
     const divider = el("div", "pane-divider");
     divider.title = "Drag to resize, double-click to reset";
@@ -345,7 +498,7 @@ function createPane(): Pane {
   panesEl.append(paneEl);
   const outline = new Outline();
   bodyEl.append(outline.el);
-  const pane: Pane = { docs: [], active: null, el: paneEl, barEl, bodyEl, outline };
+  const pane: Pane = { docs: [], active: null, el: paneEl, barEl, headEl, bodyEl, outline };
   paneEl.addEventListener("mousedown", () => setFocused(pane), true);
   paneEl.addEventListener("focusin", () => setFocused(pane));
   panes.push(pane);
@@ -555,17 +708,18 @@ async function mountRich(doc: Doc, markdown: string) {
   const instance = new Crepe({
     root: doc.editorEl,
     defaultValue: body,
-    features: { [Crepe.Feature.Latex]: false },
+    // The selection menu is Grimm's own (selectionToolbar.ts).
+    features: { [Crepe.Feature.Latex]: false, [Crepe.Feature.Toolbar]: false },
     featureConfigs: {
       [Crepe.Feature.Placeholder]: { text: "Start writing…", mode: "doc" },
       [Crepe.Feature.CodeMirror]: {
+        ...codeBlockIcons,
         theme: codeTheme,
         languages: codeLanguages,
         renderPreview,
         previewOnlyByDefault: true,
         previewToggleText: (previewOnly) => (previewOnly ? "Edit source" : "Hide source"),
       },
-      [Crepe.Feature.Toolbar]: toolbarIcons,
       [Crepe.Feature.Table]: tableIcons,
       [Crepe.Feature.ImageBlock]: {
         ...imageBlockConfig,
@@ -588,8 +742,9 @@ async function mountRich(doc: Doc, markdown: string) {
     // Headings get an id from their text. Prefixed, a heading called "Appearance"
     // or "Sidebar" cannot collide with the app's own element of that id.
     ctx.update(headingIdGenerator.key, (slug) => (node) => `h-${slug(node)}`);
+    configureTextColor(ctx);
   });
-  instance.editor.use(linkCards).use(taskShortcut).use(blockDrag).use(imageTitles);
+  instance.editor.use(linkCards).use(taskShortcut).use(blockDrag).use(imageTitles).use(textColor).use(selectionToolbar);
   instance.on((listener) => {
     listener.markdownUpdated((_ctx, md) => {
       if (doc.crepe !== instance || doc.mode !== "rich") return;
@@ -602,6 +757,7 @@ async function mountRich(doc: Doc, markdown: string) {
     });
   });
   await instance.create();
+  instance.setReadonly(doc.prefs.locked);
   doc.crepe = instance;
   doc.baseline = instance.getMarkdown();
 }
@@ -670,9 +826,22 @@ async function createDoc(pane: Pane, path: string | null, content: string, title
     el: docEl,
     editorEl,
     sourceEl,
+    prefs: prefsFor(path),
+    modified: null,
   };
+  applyPrefs(doc);
+  if (path && inTauri) {
+    invoke<number>("modified_at", { path }).then(
+      (ms) => {
+        doc.modified = ms;
+        renderHead(doc.pane);
+      },
+      () => {},
+    );
+  }
 
   docEl.addEventListener("scroll", () => doc.pane.active === doc && doc.pane.outline.sync(), { passive: true });
+  anchorScroll(docEl, editorEl);
   sourceEl.addEventListener("input", () => {
     setDirty(doc, true);
     scheduleAutosave(doc);
@@ -837,6 +1006,7 @@ async function autosave(doc: Doc) {
     return;
   }
   autosaveFailed = false;
+  doc.modified = Date.now();
   // More was typed while the file was being written: that needs its own save.
   if (getContent(doc) !== contents) return scheduleAutosave(doc);
   if (doc.mode === "rich" && doc.crepe) doc.baseline = doc.crepe.getMarkdown();
@@ -852,7 +1022,7 @@ async function saveDocument(doc: Doc | null, saveAs = false) {
   let target = doc.path;
   if (!target || saveAs) {
     const picked = await save({
-      defaultPath: doc.path ?? `${folder ? `${folder}/` : ""}${doc.title ?? "Untitled"}.md`,
+      defaultPath: doc.path ?? `${folders[0] ? `${folders[0]}/` : ""}${doc.title ?? "Untitled"}.md`,
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     if (!picked) return;
@@ -868,50 +1038,339 @@ async function saveDocument(doc: Doc | null, saveAs = false) {
   doc.path = target;
   doc.title = null;
   doc.dirty = false;
+  doc.modified = Date.now();
+  storePrefs(doc);
   if (doc.mode === "rich" && doc.crepe) doc.baseline = doc.crepe.getMarkdown();
   rememberRecent(target);
   render();
-  if (folder && target.startsWith(folder)) await refreshFolder();
+  if (folderOf(target)) await refreshFolders();
   toast("Saved");
 }
 
 // ---------- sidebar ----------
 
-async function refreshFolder() {
-  if (!folder || !inTauri) return renderSidebar();
-  try {
-    folderFiles = await invoke<string[]>("list_markdown_files", { dir: folder });
-  } catch {
-    folder = null;
-    folderFiles = [];
-    localStorage.removeItem("folder");
+/** Lists each open folder's Markdown files again; a folder that has gone is closed. */
+async function refreshFolders() {
+  if (!inTauri) return renderSidebar();
+  const gone: string[] = [];
+  await Promise.all(
+    folders.map(async (dir) => {
+      try {
+        folderFiles.set(dir, await invoke<string[]>("list_markdown_files", { dir }));
+      } catch {
+        gone.push(dir);
+      }
+    }),
+  );
+  if (gone.length) {
+    folders = folders.filter((f) => !gone.includes(f));
+    saveFolders();
   }
   renderSidebar();
 }
 
 async function openFolderDialog() {
   if (!inTauri) return toast("Opening folders needs the desktop app");
-  const picked = await open({ directory: true, multiple: false });
-  if (typeof picked !== "string") return;
-  folder = picked;
-  localStorage.setItem("folder", picked);
-  await refreshFolder();
+  const picked = await open({ directory: true, multiple: true });
+  const paths = typeof picked === "string" ? [picked] : (picked ?? []);
+  if (!paths.length) return;
+  for (const dir of paths) {
+    if (!folders.includes(dir)) folders.push(dir);
+    openDirs.add(dir);
+  }
+  saveFolders();
+  await refreshFolders();
 }
 
-function fileItem(p: string, detail: string, openPaths: Set<string>): HTMLLIElement {
+function closeFolder(dir: string) {
+  folders = folders.filter((f) => f !== dir);
+  folderFiles.delete(dir);
+  for (const open of [...openDirs]) if (open === dir || open.startsWith(`${dir}/`)) openDirs.delete(open);
+  saveFolders();
+  renderSidebar();
+}
+
+function toggleDir(dir: string) {
+  if (!openDirs.delete(dir)) openDirs.add(dir);
+  saveFolders();
+  renderSidebar();
+}
+
+/** Picks a place and a name, makes the folder there and opens it in the sidebar. */
+async function newFolderDialog() {
+  if (!inTauri) return toast("Creating folders needs the desktop app");
+  const picked = await save({ title: "New folder", defaultPath: `${folders[0] ? `${dirname(folders[0])}/` : ""}Untitled folder` });
+  if (!picked) return;
+  try {
+    await invoke("create_dir", { path: picked });
+  } catch (err) {
+    return toast(`Couldn't create the folder: ${err}`);
+  }
+  if (!folders.includes(picked)) folders.push(picked);
+  openDirs.add(picked);
+  saveFolders();
+  await refreshFolders();
+}
+
+/** Makes "Untitled.md" (or "Untitled 2.md", …) in a folder and opens it. */
+async function newNoteIn(dir: string) {
+  if (!inTauri) return newDocument();
+  let target = `${dir}/Untitled.md`;
+  for (let n = 2; await invoke<boolean>("file_exists", { path: target }); n++) target = `${dir}/Untitled ${n}.md`;
+  try {
+    await invoke("write_file", { path: target, contents: "" });
+  } catch (err) {
+    return toast(`Couldn't create the note: ${err}`);
+  }
+  openDirs.add(dir);
+  saveFolders();
+  await openPath(target);
+  await refreshFolders();
+}
+
+function toggleFavorite(path: string) {
+  favorites = favorites.includes(path) ? favorites.filter((p) => p !== path) : [...favorites, path];
+  localStorage.setItem("favorites", JSON.stringify(favorites));
+  renderSidebar();
+  panes.forEach(renderHead);
+}
+
+// ---------- renaming and moving ----------
+
+/**
+ * Renames or moves a note on disk, and everything Grimm remembers by its path
+ * goes with it: the open tab, favorites, recents, the note's own settings and
+ * its shared link. A note that changes folder takes its images along: each is
+ * copied into the new folder's assets and the links rewritten.
+ */
+async function relocate(from: string, to: string): Promise<boolean> {
+  if (from === to) return true;
+  if (!inTauri) {
+    toast("Renaming and moving notes needs the desktop app");
+    return false;
+  }
+  const doc = allDocs().find((d) => d.path === from);
+  if (doc) {
+    // Written first, and no autosave may land on the old path meanwhile.
+    await autosave(doc);
+    window.clearTimeout(autosaveTimers.get(doc));
+    if (doc.dirty) {
+      toast("Couldn't save the note first, so it was left where it is");
+      return false;
+    }
+  }
+
+  let rewritten: string | null = null;
+  // Images resolve against the note's folder, so after a move the editor shows
+  // them afresh even when no link had to change.
+  let reload: string | null = null;
+  if (dirOf(from) !== dirOf(to)) {
+    // Refused up front, so no images are copied for a move that can't happen.
+    if (await invoke<boolean>("file_exists", { path: to })) {
+      toast(`“${basename(to)}” already exists there`);
+      return false;
+    }
+    // From disk, which the save above brought up to date: the file keeps its own
+    // formatting rather than the editor's.
+    const markdown = await invoke<string>("read_file", { path: from });
+    const map: Record<string, string> = {};
+    for (const src of localImageRefs(markdown)) {
+      try {
+        map[src] = await invoke<string>("copy_image", { note: to, source: resolveRelative(dirOf(from), src) });
+      } catch {
+        // Missing, or not an image: its link is left as it was.
+      }
+    }
+    const next = rewriteImageRefs(markdown, map);
+    if (next !== markdown) rewritten = next;
+    if (Object.keys(map).length) reload = markdown;
+  }
+
+  try {
+    await invoke("rename_path", { from, to });
+  } catch (err) {
+    toast(`Couldn't ${dirOf(from) === dirOf(to) ? "rename" : "move"} the note: ${err}`);
+    return false;
+  }
+  if (rewritten !== null) {
+    try {
+      await invoke("write_file", { path: to, contents: rewritten });
+    } catch (err) {
+      toast(`Moved, but its image links couldn't be updated: ${err}`, 6000);
+      rewritten = null;
+    }
+  }
+
+  favorites = remapList(favorites, from, to);
+  localStorage.setItem("favorites", JSON.stringify(favorites));
+  recents = remapList(recents, from, to);
+  localStorage.setItem("recents", JSON.stringify(recents));
+  if (notePrefs[from]) {
+    notePrefs[to] = notePrefs[from];
+    delete notePrefs[from];
+    localStorage.setItem("notePrefs", JSON.stringify(notePrefs));
+  }
+  moveShare(from, to);
+
+  if (doc) {
+    doc.path = to;
+    doc.title = null;
+    doc.modified = Date.now();
+    const content = rewritten ?? reload;
+    if (content !== null) {
+      if (doc.mode === "rich") await mountRich(doc, content);
+      else doc.sourceEl.value = content;
+    }
+  }
+  render();
+  await refreshFolders();
+  return true;
+}
+
+async function renameNote(path: string, name: string) {
+  const problem = nameProblem(name);
+  if (problem) return toast(problem);
+  await relocate(path, renamedPath(path, name));
+}
+
+async function moveNote(path: string, dir: string) {
+  const to = movedPath(path, dir);
+  if (to === path) return;
+  if (await relocate(path, to)) {
+    openDirs.add(dir);
+    saveFolders();
+    renderSidebar();
+    toast(`Moved to ${basename(dir)}`);
+  }
+}
+
+/** Swaps a label for a text field to rename what it names; Enter or leaving it renames, Escape cancels. */
+function editInPlace(label: HTMLElement, current: string, commit: (name: string) => unknown) {
+  const input = el("input", "rename-input");
+  input.value = current;
+  input.spellcheck = false;
+  let done = false;
+  const finish = (save: boolean) => {
+    if (done) return;
+    done = true;
+    input.replaceWith(label);
+    const name = input.value.trim();
+    if (save && name && name !== current) commit(name);
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+  for (const type of ["click", "pointerdown", "dblclick"]) input.addEventListener(type, (e) => e.stopPropagation());
+  label.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+/** Renames an open note from its header: a saved note on disk, an unsaved one just on its tab. */
+function renameDoc(doc: Doc) {
+  const label = doc.pane.headEl.querySelector<HTMLElement>(".crumb:last-of-type");
+  if (!label) return;
+  editInPlace(label, displayName(doc), (name) => {
+    if (doc.path) return renameNote(doc.path, name);
+    const problem = nameProblem(name);
+    if (problem) return toast(problem);
+    doc.title = name;
+    render();
+  });
+}
+
+/** Renames a note from its sidebar row. */
+function renameRow(li: HTMLElement, path: string) {
+  const label = li.querySelector<HTMLElement>(".name");
+  if (label) editInPlace(label, stripExtension(basename(path)), (name) => renameNote(path, name));
+}
+
+/** The open folders and their subfolders, as places a note can move to. */
+function moveTargets(exclude: string): { dir: string; label: string }[] {
+  const out: { dir: string; label: string }[] = [];
+  const walk = (node: DirNode, trail: string[]) => {
+    const label = [...trail, basename(node.path)];
+    if (node.path !== exclude) out.push({ dir: node.path, label: label.join(" / ") });
+    for (const sub of [...node.dirs.values()].sort((a, b) => a.path.localeCompare(b.path))) walk(sub, label);
+  };
+  for (const dir of folders) walk(dirTree(dir, folderFiles.get(dir) ?? []), []);
+  return out.slice(0, 40);
+}
+
+function openMoveMenu(path: string, anchor: HTMLElement) {
+  const items: MenuItem[] = moveTargets(dirOf(path)).map(({ dir, label }) => ({
+    label,
+    icon: Folder,
+    run: () => moveNote(path, dir),
+  }));
+  items.push({
+    label: "Choose a folder…",
+    icon: FolderOpen,
+    run: async () => {
+      if (!inTauri) return toast("Moving notes needs the desktop app");
+      const picked = await open({ directory: true, multiple: false, defaultPath: dirOf(path) });
+      if (typeof picked === "string") await moveNote(path, picked);
+    },
+  });
+  openRowMenu(anchor, items);
+}
+
+/** The "…" on a note's sidebar row. */
+function noteRowMenu(li: HTMLElement, path: string, anchor: HTMLElement) {
+  const starred = favorites.includes(path);
+  openRowMenu(anchor, [
+    { label: "Rename", icon: PenLine, run: () => renameRow(li, path) },
+    { label: "Move to…", icon: FolderInput, run: () => setTimeout(() => openMoveMenu(path, anchor)) },
+    { label: starred ? "Remove from Favorites" : "Add to Favorites", icon: Star, run: () => toggleFavorite(path) },
+    ...(inTauri ? [{ label: "Show in Finder", icon: FolderOpen, run: () => revealItemInDir(path) }] : []),
+  ]);
+}
+
+// ---------- row menus ----------
+
+// The small menu behind a sidebar row's "…" (and the Folders "+").
+const rowMenu = document.body.appendChild(el("div", "page-menu row-menu"));
+rowMenu.hidden = true;
+
+function openRowMenu(anchor: HTMLElement, items: MenuItem[]) {
+  rowMenu.replaceChildren(...items.map((item) => menuRow(item, () => (rowMenu.hidden = true))));
+  rowMenu.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  const top = rect.bottom + 4 + rowMenu.offsetHeight > window.innerHeight ? rect.top - rowMenu.offsetHeight - 4 : rect.bottom + 4;
+  rowMenu.style.top = `${Math.max(8, top)}px`;
+  rowMenu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - rowMenu.offsetWidth - 8))}px`;
+}
+
+function rowAction(node: IconNode, title: string, onClick: (anchor: HTMLElement) => void) {
+  const button = iconButton(node, title, (e) => {
+    e.stopPropagation();
+    onClick(e.currentTarget as HTMLElement);
+  }, "icon-btn small row-action");
+  // Pressing an action must not start a file drag or toggle the row.
+  button.addEventListener("pointerdown", (e) => e.stopPropagation());
+  return button;
+}
+
+function fileItem(p: string, detail: string, openPaths: Set<string>, depth = 0): HTMLLIElement {
   const li = el("li");
+  li.style.setProperty("--depth", String(depth));
   li.title = `${p}\n⌘-click to open in the other pane`;
   li.classList.toggle("open", openPaths.has(p));
   li.classList.toggle("current", focused.active?.path === p);
   const name = el("span", "name");
-  name.textContent = basename(p);
-  li.append(name);
+  name.textContent = stripExtension(basename(p));
+  li.append(icon(FileText), name);
   if (detail) {
     const dir = el("span", "dir");
-    // The bidi mark keeps the leading "/" or "~" in place inside the rtl-truncated label.
-    dir.textContent = `‎${detail}`;
+    dir.textContent = detail;
     li.append(dir);
   }
+  const actions = el("span", "row-actions");
+  actions.append(rowAction(Ellipsis, "Rename, move and more", (anchor) => noteRowMenu(li, p, anchor)));
+  li.append(actions);
   li.addEventListener("click", (e) => fileDragged || openPath(p, { otherPane: e.metaKey || e.ctrlKey }));
   li.addEventListener("pointerdown", (e) => startFileDrag(e, p));
   return li;
@@ -927,10 +1386,17 @@ function startFileDrag(down: PointerEvent, path: string) {
   const ghost = el("div", "drag-ghost");
   ghost.textContent = basename(path);
   let target: Pane | null = null;
+  // A folder row under the pointer: dropping there moves the note into it.
+  let folderTarget: HTMLElement | null = null;
 
   const mark = (pane: Pane | null) => {
     target = pane;
     for (const p of panes) p.el.classList.toggle("drop-target", p === pane);
+  };
+  const markFolder = (row: HTMLElement | null) => {
+    folderTarget?.classList.remove("drop-into");
+    folderTarget = row && row.dataset.dir !== dirOf(path) ? row : null;
+    folderTarget?.classList.add("drop-into");
   };
   const move = (e: PointerEvent) => {
     if (!fileDragged) {
@@ -940,6 +1406,7 @@ function startFileDrag(down: PointerEvent, path: string) {
       document.body.append(ghost);
     }
     ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 14}px)`;
+    markFolder(document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>(".dir-row[data-dir]") ?? null);
     mark(
       panes.find((p) => {
         const r = p.el.getBoundingClientRect();
@@ -954,10 +1421,13 @@ function startFileDrag(down: PointerEvent, path: string) {
     window.removeEventListener("keydown", key, true);
     if (!fileDragged) return;
     const pane = target;
+    const into = folderTarget?.dataset.dir;
     mark(null);
+    markFolder(null);
     document.body.classList.remove("dragging-tab");
     ghost.remove();
-    if (drop && pane) openPath(path, { pane });
+    if (drop && into) moveNote(path, into);
+    else if (drop && pane) openPath(path, { pane });
   };
   const up = () => stop(true);
   const cancel = () => stop(false);
@@ -973,32 +1443,173 @@ function startFileDrag(down: PointerEvent, path: string) {
   window.addEventListener("keydown", key, true);
 }
 
-function renderSidebar() {
-  const openPaths = new Set(allDocs().flatMap((d) => (d.path ? [d.path] : [])));
-  $("folder-section").hidden = !folder;
-  if (folder) {
-    $("folder-name").textContent = basename(folder);
-    $("folder-name").title = folder;
-    const root = folder;
-    const items = folderFiles.map((p) => {
-      const rel = dirname(p).slice(root.length).replace(/^[\\/]/, "");
-      return fileItem(p, rel, openPaths);
-    });
-    if (!items.length) {
-      const empty = el("li", "empty");
-      empty.textContent = "No markdown files";
-      items.push(empty);
+const RECENTS_SHOWN = 6;
+let showAllRecents = false;
+
+interface DirNode {
+  path: string;
+  dirs: Map<string, DirNode>;
+  files: string[];
+}
+
+/** An open folder's files as a tree of subfolders. */
+function dirTree(root: string, files: string[]): DirNode {
+  const top: DirNode = { path: root, dirs: new Map(), files: [] };
+  for (const file of files) {
+    let node = top;
+    for (const part of dirname(file).slice(root.length).split(/[\\/]/).filter(Boolean)) {
+      let next = node.dirs.get(part);
+      if (!next) node.dirs.set(part, (next = { path: `${node.path}/${part}`, dirs: new Map(), files: [] }));
+      node = next;
     }
-    $("folder-list").replaceChildren(...items);
+    node.files.push(file);
+  }
+  return top;
+}
+
+/** A folder row: its icon turns into a fold chevron on hover; + and … sit at the right. */
+function dirRow(node: DirNode, depth: number, openPaths: Set<string>, top: boolean): HTMLElement[] {
+  const open = openDirs.has(node.path);
+  const li = el("li", "dir-row");
+  li.dataset.dir = node.path;
+  li.style.setProperty("--depth", String(depth));
+  li.classList.toggle("expanded", open);
+  li.title = tildify(node.path);
+  const glyph = el("span", "row-glyph");
+  glyph.append(icon(Folder), icon(ChevronRight));
+  const name = Object.assign(el("span", "name"), { textContent: basename(node.path) });
+  const menu: MenuItem[] = [{ label: "New note", icon: SquarePen, run: () => newNoteIn(node.path) }];
+  if (inTauri) menu.push({ label: "Show in Finder", icon: FolderOpen, run: () => revealItemInDir(node.path) });
+  if (top) menu.push({ label: "Remove from sidebar", icon: X, run: () => closeFolder(node.path) });
+  const actions = el("span", "row-actions");
+  actions.append(
+    rowAction(Plus, "New note in this folder", () => newNoteIn(node.path)),
+    rowAction(Ellipsis, "More", (anchor) => openRowMenu(anchor, menu)),
+  );
+  li.append(glyph, name, actions);
+  li.addEventListener("click", () => toggleDir(node.path));
+
+  const rows: HTMLElement[] = [li];
+  if (!open) return rows;
+  const subdirs = [...node.dirs.values()].sort((a, b) => basename(a.path).localeCompare(basename(b.path)));
+  for (const sub of subdirs) rows.push(...dirRow(sub, depth + 1, openPaths, false));
+  for (const file of node.files) rows.push(fileItem(file, "", openPaths, depth + 1));
+  if (top && !subdirs.length && !node.files.length) {
+    const empty = Object.assign(el("li", "empty"), { textContent: "No notes yet" });
+    empty.style.setProperty("--depth", String(depth + 1));
+    rows.push(empty);
+  }
+  return rows;
+}
+
+/** A sidebar section whose header folds it; `extra` goes at the header's right. */
+function sideSection(id: string, title: string, rows: HTMLElement[], extra: HTMLElement[] = [], forceOpen = false): HTMLElement {
+  const collapsed = collapsedSections.has(id) && !forceOpen;
+  const section = el("section", "side-section");
+  section.classList.toggle("collapsed", collapsed);
+  const header = el("header");
+  const fold = el("button", "section-fold");
+  fold.append(Object.assign(el("h2"), { textContent: title }), icon(ChevronDown));
+  fold.title = collapsed ? `Show ${title.toLowerCase()}` : `Hide ${title.toLowerCase()}`;
+  fold.addEventListener("click", () => {
+    if (!collapsedSections.delete(id)) collapsedSections.add(id);
+    localStorage.setItem("collapsedSections", JSON.stringify([...collapsedSections]));
+    renderSidebar();
+  });
+  header.append(fold, ...extra);
+  section.append(header);
+  if (!collapsed) {
+    const list = el("ul", "file-list");
+    list.append(...rows);
+    section.append(list);
+  }
+  return section;
+}
+
+function renderSidebar() {
+  if (sidebarEl.contains(document.activeElement) && document.activeElement?.matches(".rename-input")) return;
+  const openPaths = new Set(allDocs().flatMap((d) => (d.path ? [d.path] : [])));
+  const query = sideSearch.value.trim().toLowerCase();
+  const matches = (p: string) => !query || basename(p).toLowerCase().includes(query);
+  const sections: HTMLElement[] = [];
+
+  const favs = favorites.filter(matches);
+  if (favs.length) sections.push(sideSection("favorites", "Favorites", favs.map((p) => fileItem(p, "", openPaths)), [], Boolean(query)));
+
+  // While searching, each folder lists its matching notes flat, with their subfolder.
+  const folderRows = folders.flatMap((dir) => {
+    const files = folderFiles.get(dir) ?? [];
+    if (!query) return dirRow(dirTree(dir, files), 0, openPaths, true);
+    const found = files.filter(matches);
+    if (!found.length) return [];
+    const head = Object.assign(el("li", "dir-row expanded search-dir"), { title: tildify(dir) });
+    const glyph = el("span", "row-glyph");
+    glyph.append(icon(Folder));
+    head.append(glyph, Object.assign(el("span", "name"), { textContent: basename(dir) }));
+    return [head, ...found.map((p) => fileItem(p, dirname(p).slice(dir.length).replace(/^[\\/]/, ""), openPaths, 1))];
+  });
+  if (!folders.length && !query) {
+    const open = Object.assign(el("li", "empty add-folder"), { textContent: "Open or create a folder" });
+    open.addEventListener("click", openFolderDialog);
+    folderRows.push(open);
+  }
+  const addFolder = rowAction(Plus, "Add a folder", (anchor) =>
+    openRowMenu(anchor, [
+      { label: "Open folder…", icon: FolderOpen, hint: "⇧⌘O", run: openFolderDialog },
+      { label: "New folder…", icon: FolderPlus, run: newFolderDialog },
+    ]),
+  );
+  if (folderRows.length || !query) sections.push(sideSection("folders", "Folders", folderRows, [addFolder], Boolean(query)));
+
+  const shared = sharedPages().map((page) => page.path).filter(matches);
+  if (shared.length) {
+    const rows = shared.map((p) => {
+      const li = fileItem(p, "", openPaths);
+      li.querySelector(".lucide")?.replaceWith(icon(Globe));
+      return li;
+    });
+    sections.push(sideSection("shared", "Shared", rows, [], Boolean(query)));
   }
 
-  $("recent-section").hidden = recents.length === 0;
-  $("recent-list").replaceChildren(...recents.map((p) => fileItem(p, tildify(dirname(p)), openPaths)));
+  const found = recents.filter(matches);
+  if (found.length) {
+    const shown = query || showAllRecents ? found : found.slice(0, RECENTS_SHOWN);
+    const rows: HTMLElement[] = shown.map((p) => fileItem(p, "", openPaths));
+    if (!query && found.length > RECENTS_SHOWN) {
+      const more = el("li", "more-row");
+      more.append(icon(Ellipsis), Object.assign(el("span", "name"), { textContent: showAllRecents ? "Show less" : "View all" }));
+      more.addEventListener("click", () => {
+        showAllRecents = !showAllRecents;
+        renderSidebar();
+      });
+      rows.push(more);
+    }
+    sections.push(sideSection("recents", "Recents", rows, [], Boolean(query)));
+  }
+
+  $("side-sections").replaceChildren(...sections);
+  $("search-empty").hidden = !query || sections.length > 0;
 }
 
 function toggleSidebar() {
   const collapsed = app.classList.toggle("sidebar-collapsed");
   localStorage.setItem("sidebarCollapsed", String(collapsed));
+  peekSidebar(false, true);
+  panes.forEach(renderBar);
+}
+
+// While the sidebar is closed it can be peeked at: it floats over the page
+// for as long as the pointer is on the toggle or on the sidebar itself.
+let peekTimer = 0;
+function peekSidebar(show: boolean, now = false) {
+  window.clearTimeout(peekTimer);
+  if (show && app.classList.contains("sidebar-collapsed")) return void app.classList.add("sidebar-peek");
+  if (now) return void app.classList.remove("sidebar-peek");
+  peekTimer = window.setTimeout(() => {
+    // A menu opened from the sidebar keeps it out.
+    if (!appearanceMenu.hidden || !rowMenu.hidden || sidebarEl.contains(document.activeElement)) return;
+    app.classList.remove("sidebar-peek");
+  }, 300);
 }
 
 // ---------- appearance ----------
@@ -1017,30 +1628,27 @@ function setTheme(next: Theme) {
   localStorage.setItem("theme", next.id);
 }
 
-function setDocFont(next: DocFont) {
-  docFont = next;
-  document.documentElement.dataset.font = next;
-  localStorage.setItem("font", next);
+function storePrefs(doc: Doc) {
+  if (!doc.path) return;
+  notePrefs[doc.path] = { ...doc.prefs };
+  localStorage.setItem("notePrefs", JSON.stringify(notePrefs));
 }
 
-function setDocSize(next: DocSize) {
-  docSize = next;
-  document.documentElement.dataset.size = next;
-  localStorage.setItem("fontSize", next);
-  for (const pane of panes) {
-    if (pane.active?.mode === "source") autosizeSource(pane.active);
-    pane.outline.sync();
-  }
+function applyPrefs(doc: Doc) {
+  const { font, size, width, locked } = doc.prefs;
+  Object.assign(doc.el.dataset, { font, size, width });
+  doc.el.classList.toggle("locked", locked);
+  doc.sourceEl.readOnly = locked;
+  doc.crepe?.setReadonly(locked);
 }
 
-function setPageWidth(next: PageWidth) {
-  pageWidth = next;
-  document.documentElement.dataset.width = next;
-  localStorage.setItem("pageWidth", next);
-  for (const pane of panes) {
-    if (pane.active?.mode === "source") autosizeSource(pane.active);
-    pane.outline.sync();
-  }
+function updatePrefs(doc: Doc, patch: Partial<NotePrefs>) {
+  Object.assign(doc.prefs, patch);
+  applyPrefs(doc);
+  storePrefs(doc);
+  if (doc.mode === "source") autosizeSource(doc);
+  if (doc.pane.active === doc) doc.pane.outline.sync();
+  renderHead(doc.pane);
 }
 
 function renderAppearance() {
@@ -1071,43 +1679,7 @@ function renderAppearance() {
     grid.append(tile);
   }
 
-  const fonts = el("div", "font-toggle");
-  for (const [id, text] of [["serif", "Serif"], ["sans", "Sans"], ["mono", "Mono"]] as const) {
-    const button = el("button", id);
-    button.textContent = text;
-    button.classList.toggle("selected", id === docFont);
-    button.addEventListener("click", () => {
-      setDocFont(id);
-      renderAppearance();
-    });
-    fonts.append(button);
-  }
-
-  const sizes = el("div", "font-toggle");
-  for (const [id, text] of [["small", "Small"], ["normal", "Normal"], ["large", "Large"]] as const) {
-    const button = el("button");
-    button.textContent = text;
-    button.classList.toggle("selected", id === docSize);
-    button.addEventListener("click", () => {
-      setDocSize(id);
-      renderAppearance();
-    });
-    sizes.append(button);
-  }
-
-  const widths = el("div", "font-toggle");
-  for (const [id, text] of [["centered", "Centered"], ["full", "Full width"]] as const) {
-    const button = el("button");
-    button.textContent = text;
-    button.classList.toggle("selected", id === pageWidth);
-    button.addEventListener("click", () => {
-      setPageWidth(id);
-      renderAppearance();
-    });
-    widths.append(button);
-  }
-
-  appearanceMenu.replaceChildren(label("Theme"), grid, label("Font"), fonts, label("Text size"), sizes, label("Page width"), widths);
+  appearanceMenu.replaceChildren(label("Theme"), grid);
 }
 
 function toggleAppearance(anchor: HTMLElement) {
@@ -1116,8 +1688,233 @@ function toggleAppearance(anchor: HTMLElement) {
   renderAppearance();
   appearanceMenu.hidden = false;
   const rect = anchor.getBoundingClientRect();
-  appearanceMenu.style.top = `${rect.bottom + 6}px`;
-  appearanceMenu.style.left = `${Math.max(8, rect.right - appearanceMenu.offsetWidth)}px`;
+  // Opened from the sidebar's foot, it rises above the button.
+  appearanceMenu.style.top = `${Math.max(8, rect.top - appearanceMenu.offsetHeight - 6)}px`;
+  appearanceMenu.style.left = `${Math.max(8, rect.left)}px`;
+}
+
+// ---------- page menu ----------
+
+// Each note's "…" menu: what can be done to this note, and how it looks.
+const pageMenu = document.body.appendChild(el("div", "page-menu"));
+pageMenu.hidden = true;
+let menuDoc: Doc | null = null;
+
+interface MenuItem {
+  label: string;
+  icon: IconNode;
+  run?: () => void;
+  hint?: string;
+  toggle?: boolean;
+}
+
+function closePageMenu() {
+  if (pageMenu.hidden) return;
+  pageMenu.hidden = true;
+  const doc = menuDoc;
+  menuDoc = null;
+  if (doc) renderHead(doc.pane);
+}
+
+function switchEl(on: boolean) {
+  const node = el("span", "switch");
+  node.classList.toggle("on", on);
+  node.append(el("i"));
+  return node;
+}
+
+function menuRow(item: MenuItem, close: () => void): HTMLButtonElement {
+  const row = el("button", "menu-row");
+  row.append(icon(item.icon), Object.assign(el("span", "menu-text"), { textContent: item.label }));
+  if (item.hint) row.append(Object.assign(el("span", "menu-hint"), { textContent: item.hint }));
+  if (item.toggle !== undefined) row.append(switchEl(item.toggle));
+  row.addEventListener("click", (e) => {
+    e.stopPropagation();
+    item.run?.();
+    if (item.toggle === undefined) close();
+  });
+  return row;
+}
+
+function pageMenuItems(doc: Doc): MenuItem[][] {
+  const record = doc.path ? shareRecord(doc.path) : null;
+  const copy = (text: string, done: string) =>
+    navigator.clipboard.writeText(text).then(
+      () => toast(done),
+      () => toast("Couldn't copy"),
+    );
+  const actions: MenuItem[] = [];
+  if (record) actions.push({ label: "Copy link", icon: Link2, run: () => copy(record.url, "Link copied") });
+  if (doc.path) {
+    const path = doc.path;
+    const starred = favorites.includes(path);
+    actions.push({ label: starred ? "Remove from Favorites" : "Add to Favorites", icon: Star, run: () => toggleFavorite(path) });
+    actions.push({ label: "Copy file path", icon: ClipboardCopy, run: () => copy(path, "Path copied") });
+  }
+  actions.push({ label: "Rename", icon: PenLine, run: () => setTimeout(() => renameDoc(doc)) });
+  if (doc.path) {
+    const path = doc.path;
+    const more = doc.pane.headEl.querySelector<HTMLElement>(".more-btn");
+    actions.push({ label: "Move to…", icon: FolderInput, run: () => setTimeout(() => more && openMoveMenu(path, more)) });
+  }
+  actions.push(
+    { label: "Copy page contents", icon: Copy, run: () => copy(getContent(doc), "Contents copied") },
+    { label: "Duplicate", icon: CopyPlus, run: () => duplicateDoc(doc) },
+  );
+  if (doc.path && inTauri) actions.push({ label: "Show in Finder", icon: FolderOpen, run: () => revealItemInDir(doc.path!) });
+  if (panes.length > 1) {
+    actions.push({
+      label: "Move to other pane",
+      icon: ArrowRightLeft,
+      run: () => {
+        const target = panes.find((p) => p !== doc.pane);
+        if (target) moveDoc(doc, target);
+      },
+    });
+  }
+
+  const look: MenuItem[] = [
+    {
+      label: "Markdown source",
+      icon: Code,
+      hint: "⌘/",
+      toggle: doc.mode === "source",
+      run: () => setMode(doc, doc.mode === "rich" ? "source" : "rich").then(() => renderPageMenu(doc)),
+    },
+  ];
+
+  const page: MenuItem[] = [
+    { label: record ? "Shared to web…" : "Share to web…", icon: record ? Globe : Share, run: () => toggleShare(doc) },
+    {
+      label: "Lock page",
+      icon: Lock,
+      toggle: doc.prefs.locked,
+      run: () => {
+        updatePrefs(doc, { locked: !doc.prefs.locked });
+        renderPageMenu(doc);
+      },
+    },
+  ];
+  return [actions, look, page];
+}
+
+function renderPageMenu(doc: Doc, filter = "") {
+  const search = el("label", "menu-search");
+  const input = el("input");
+  input.placeholder = "Search actions…";
+  input.value = filter;
+  search.append(icon(Search), input);
+  input.addEventListener("input", () => {
+    renderPageMenu(doc, input.value);
+    const next = pageMenu.querySelector<HTMLInputElement>(".menu-search input");
+    next?.focus();
+    next?.setSelectionRange(next.value.length, next.value.length);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    pageMenu.querySelector<HTMLButtonElement>(".menu-row")?.click();
+  });
+
+  const children: HTMLElement[] = [search];
+  const needle = filter.trim().toLowerCase();
+  if ("font text size full width layout appearance".includes(needle) || !needle) children.push(...layoutControls(doc));
+  for (const section of pageMenuItems(doc)) {
+    const rows = section.filter((item) => item.label.toLowerCase().includes(needle));
+    if (!rows.length) continue;
+    children.push(el("div", "menu-sep"), ...rows.map((item) => menuRow(item, closePageMenu)));
+  }
+
+  if (!needle) {
+    const foot = el("div", "menu-foot");
+    const lines: string[] = [];
+    if (doc.modified) lines.push(editedAt(doc.modified));
+    lines.push(wordCount(doc));
+    foot.append(Object.assign(el("div", "menu-foot-label"), { textContent: doc.modified ? "Last edited" : "This note" }));
+    for (const line of lines) foot.append(Object.assign(el("div"), { textContent: line }));
+    children.push(el("div", "menu-sep"), foot);
+  }
+  pageMenu.replaceChildren(...children);
+}
+
+function togglePageMenu(doc: Doc, anchor: HTMLElement) {
+  if (!pageMenu.hidden && menuDoc === doc) return closePageMenu();
+  appearanceMenu.hidden = shareMenu.hidden = true;
+  menuDoc = doc;
+  renderPageMenu(doc);
+  pageMenu.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  pageMenu.style.top = `${rect.bottom + 6}px`;
+  pageMenu.style.left = `${Math.max(8, rect.right - pageMenu.offsetWidth)}px`;
+  anchor.classList.add("on");
+  pageMenu.querySelector<HTMLInputElement>(".menu-search input")?.focus();
+}
+
+/** Font, text size and width for one note, at the top of its page menu. */
+function layoutControls(doc: Doc): HTMLElement[] {
+  const refresh = (patch: Partial<NotePrefs>) => {
+    updatePrefs(doc, patch);
+    const input = pageMenu.querySelector<HTMLInputElement>(".menu-search input");
+    renderPageMenu(doc, input?.value ?? "");
+  };
+
+  const fonts = el("div", "font-tiles");
+  for (const [id, text] of [["serif", "Serif"], ["sans", "Sans"], ["mono", "Mono"]] as const) {
+    const tile = el("button", "font-tile");
+    tile.dataset.font = id;
+    tile.classList.toggle("selected", doc.prefs.font === id);
+    tile.append(Object.assign(el("span", "font-sample"), { textContent: "Ag" }), Object.assign(el("span"), { textContent: text }));
+    tile.addEventListener("click", (e) => {
+      e.stopPropagation();
+      refresh({ font: id });
+    });
+    fonts.append(tile);
+  }
+
+  const sizes = el("div", "font-toggle menu-sizes");
+  for (const [id, text] of [["small", "Small"], ["normal", "Normal"], ["large", "Large"]] as const) {
+    const button = el("button");
+    button.textContent = text;
+    button.classList.toggle("selected", doc.prefs.size === id);
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      refresh({ size: id });
+    });
+    sizes.append(button);
+  }
+
+  const full = menuRow(
+    {
+      label: "Full width",
+      icon: Columns2,
+      toggle: doc.prefs.width === "full",
+      run: () => refresh({ width: doc.prefs.width === "full" ? "centered" : "full" }),
+    },
+    () => {},
+  );
+
+  return [el("div", "menu-sep"), fonts, sizes, full];
+}
+
+/** Opens a copy of the note: beside the file as "name copy.md", or as a new unsaved note. */
+async function duplicateDoc(doc: Doc) {
+  const contents = getContent(doc);
+  if (!doc.path || !inTauri) {
+    await createDoc(doc.pane, null, contents, `${displayName(doc)} copy`);
+    return render();
+  }
+  const base = doc.path.replace(/\.[^./\\]+$/, "");
+  const ext = doc.path.slice(base.length) || ".md";
+  let target = `${base} copy${ext}`;
+  for (let n = 2; await invoke<boolean>("file_exists", { path: target }); n++) target = `${base} copy ${n}${ext}`;
+  try {
+    await invoke("write_file", { path: target, contents });
+  } catch (err) {
+    return toast(`Couldn't duplicate: ${err}`);
+  }
+  notePrefs[target] = { ...doc.prefs, locked: false };
+  localStorage.setItem("notePrefs", JSON.stringify(notePrefs));
+  await openPath(target, { pane: doc.pane });
+  if (folderOf(target)) await refreshFolders();
 }
 
 // ---------- sharing ----------
@@ -1131,7 +1928,7 @@ function shareInput(doc: Doc): ShareInput | null {
     path: doc.path,
     markdown: getContent(doc),
     title: docName(doc).replace(/\.[^.]+$/, ""),
-    appearance: { theme: theme.id, font: docFont, size: docSize, width: pageWidth },
+    appearance: { theme: theme.id, font: doc.prefs.font, size: doc.prefs.size, width: doc.prefs.width },
   };
 }
 
@@ -1289,6 +2086,12 @@ async function renderShareMenu(error = "") {
     message.textContent = error;
     children.push(message);
   }
+  if (inTauri && sharedPages().length) {
+    const all = el("button", "share-all");
+    all.textContent = "All shared pages";
+    all.addEventListener("click", openSharedPages);
+    children.push(all);
+  }
   shareMenu.replaceChildren(...children);
 }
 
@@ -1323,20 +2126,129 @@ async function runShare(doc: Doc, action: "publish" | "unshare") {
   }
   shareBusy = null;
   renderBar(doc.pane);
+  renderSidebar();
   if (shareDoc === doc && !shareMenu.hidden) await renderShareMenu(error);
 }
 
 async function toggleShare(doc: Doc, anchor?: HTMLElement) {
   if (!shareMenu.hidden && shareDoc === doc) return void (shareMenu.hidden = true);
   appearanceMenu.hidden = true;
+  closePageMenu();
   shareDoc = doc;
   await renderShareMenu();
   shareMenu.hidden = false;
-  const target = anchor ?? doc.pane.barEl.querySelector<HTMLElement>(".share-btn");
+  const target = anchor ?? doc.pane.headEl.querySelector<HTMLElement>(".share-btn");
   const rect = target?.getBoundingClientRect() ?? new DOMRect(window.innerWidth - 16, 40, 0, 0);
   shareMenu.style.top = `${rect.bottom + 6}px`;
   shareMenu.style.left = `${Math.max(8, rect.right - shareMenu.offsetWidth)}px`;
 }
+
+// ---------- shared pages ----------
+
+/** Lists every page shared from this Mac, with what can be done to each. */
+function openSharedPages() {
+  shareMenu.hidden = appearanceMenu.hidden = true;
+  if (!inTauri) return;
+  renderSharedPages();
+  sharedPagesEl.hidden = false;
+}
+
+function closeSharedPages() {
+  sharedPagesEl.hidden = true;
+}
+
+function renderSharedPages(notice = "") {
+  const panel = el("div", "sp-panel");
+  const head = el("div", "sp-head");
+  const title = el("span", "share-title");
+  title.textContent = "Shared pages";
+  head.append(title, iconButton(X, "Close", closeSharedPages, "icon-btn small"));
+  const intro = el("p", "share-intro");
+  intro.textContent = "Notes shared from this Mac. Each link stops working 30 days after it was first shared.";
+  panel.append(head, intro);
+
+  const pages = sharedPages();
+  const list = el("div", "sp-list");
+  for (const { path, record } of pages) {
+    const row = el("div", "sp-row");
+    const main = el("button", "sp-main");
+    main.title = `Open ${basename(path)}`;
+    const name = el("span", "sp-title");
+    name.textContent = basename(path).replace(/\.[^.]+$/, "");
+    const meta = el("span", "sp-meta");
+    const expiry = record.expiresAt ? `Expires ${shareDate(record.expiresAt)}` : "Doesn’t expire";
+    meta.textContent = `${tildify(path)} · ${expiry}`;
+    main.append(name, meta);
+    main.addEventListener("click", async () => {
+      closeSharedPages();
+      await openPath(path);
+    });
+
+    const actions = el("div", "sp-actions");
+    const copy = iconButton(Copy, "Copy link", async () => {
+      if (!(await copyLink(record.url))) return;
+      copy.replaceChildren(icon(Check));
+      window.setTimeout(() => copy.replaceChildren(icon(Copy)), 1400);
+    });
+    actions.append(
+      copy,
+      iconButton(ExternalLink, "View page", () => openUrl(record.url).catch(() => {})),
+      iconButton(Trash2, "Stop sharing", async () => {
+        const confirmed = await ask("The link will stop working for anyone who has it.", {
+          title: `Stop sharing “${name.textContent}”?`,
+          kind: "warning",
+          okLabel: "Stop Sharing",
+          cancelLabel: "Cancel",
+        });
+        if (!confirmed) return;
+        try {
+          await unshare(path);
+          for (const pane of panes) renderBar(pane);
+          renderSidebar();
+          renderSharedPages();
+        } catch (e) {
+          renderSharedPages(e instanceof Error ? e.message : String(e));
+        }
+      }),
+    );
+    row.append(main, actions);
+    list.append(row);
+
+    // Fill in what only the server and the disk know: the page's title, and whether the note is still there.
+    invoke<boolean>("file_exists", { path }).then((exists) => {
+      if (exists) return;
+      main.disabled = true;
+      main.title = "The note was moved or deleted";
+      meta.textContent = `File not found · ${expiry}`;
+    });
+    shareStatus(path).then((status) => {
+      if (!status || !row.isConnected) return;
+      if (status.status !== "live") {
+        row.remove();
+        if (!list.children.length) renderSharedPages();
+        return;
+      }
+      if (status.title) name.textContent = status.title;
+    });
+  }
+
+  if (pages.length) panel.append(list);
+  else {
+    const empty = el("p", "sp-empty");
+    empty.textContent = "Nothing is shared right now. Use Share on a note to publish it as a web page.";
+    panel.append(empty);
+  }
+  if (notice) {
+    const message = el("p", "share-error");
+    message.textContent = notice;
+    panel.append(message);
+  }
+  sharedPagesEl.replaceChildren(panel);
+}
+
+sharedPagesEl.addEventListener("mousedown", (e) => {
+  if (e.target === sharedPagesEl) closeSharedPages();
+});
 
 // ---------- updates ----------
 
@@ -1447,6 +2359,8 @@ const commands: Record<string, () => unknown> = {
   help: () => openGuide("help"),
   examples: () => openGuide("examples"),
   share: () => focused.active && toggleShare(focused.active),
+  "shared-pages": openSharedPages,
+  search: focusSearch,
 };
 
 // A shortcut can arrive both as a keydown and as a native menu event; the
@@ -1478,6 +2392,8 @@ function shortcut(e: KeyboardEvent): string | null {
       return e.shiftKey ? "toggle-split" : "toggle-sidebar";
     case "Slash":
       return "toggle-source";
+    case "KeyK":
+      return e.shiftKey ? null : "search";
     case "BracketRight":
       return e.shiftKey ? "next-tab" : null;
     case "BracketLeft":
@@ -1490,23 +2406,52 @@ function shortcut(e: KeyboardEvent): string | null {
 // ---------- wiring ----------
 
 createIcons({
-  icons: { Plus, FileText, FolderOpen, X, CircleQuestionMark },
+  icons: { ChevronDown, CircleQuestionMark, Ellipsis, FileText, FolderOpen, Palette, PanelLeft, Search, SquarePen, X },
   attrs: ICON_ATTRS,
 });
 
-$("btn-new").addEventListener("click", () => newDocument());
+$("btn-sidebar").addEventListener("click", toggleSidebar);
+$("btn-compose").addEventListener("click", () => newDocument());
 $("btn-open").addEventListener("click", openDialog);
 $("btn-folder").addEventListener("click", openFolderDialog);
 $("btn-help").addEventListener("click", () => openGuide("help"));
-$("btn-close-folder").addEventListener("click", () => {
-  folder = null;
-  folderFiles = [];
-  localStorage.removeItem("folder");
-  renderSidebar();
+$("btn-theme").addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleAppearance(e.currentTarget as HTMLElement);
 });
+sidebarEl.addEventListener("mouseenter", () => peekSidebar(true));
+sidebarEl.addEventListener("mouseleave", () => peekSidebar(false));
+
+/** ⌘K: into the sidebar's search, peeking at the sidebar if it is closed. */
+function focusSearch() {
+  peekSidebar(true);
+  sideSearch.focus();
+  sideSearch.select();
+}
+
+sideSearch.addEventListener("input", renderSidebar);
+sideSearch.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    e.stopPropagation();
+    sideSearch.value = "";
+    renderSidebar();
+    sideSearch.blur();
+    peekSidebar(false);
+  } else if (e.key === "Enter") {
+    sidebarEl.querySelector<HTMLElement>(".file-list li:not(.empty)")?.click();
+    sideSearch.value = "";
+    renderSidebar();
+    sideSearch.blur();
+    peekSidebar(false, true);
+  }
+});
+sideSearch.addEventListener("blur", () => peekSidebar(false));
 
 window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") appearanceMenu.hidden = shareMenu.hidden = true;
+  if (e.key === "Escape") {
+    appearanceMenu.hidden = shareMenu.hidden = sharedPagesEl.hidden = rowMenu.hidden = true;
+    closePageMenu();
+  }
   const id = shortcut(e);
   if (!id) return;
   e.preventDefault();
@@ -1516,10 +2461,14 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("mousedown", (e) => {
   if (!appearanceMenu.hidden && !appearanceMenu.contains(e.target as Node)) appearanceMenu.hidden = true;
   if (!shareMenu.hidden && !shareMenu.contains(e.target as Node)) shareMenu.hidden = true;
+  const target = e.target as Node;
+  if (!pageMenu.hidden && !pageMenu.contains(target)) closePageMenu();
+  if (!rowMenu.hidden && !rowMenu.contains(target)) rowMenu.hidden = true;
 });
 
 window.addEventListener("resize", () => {
   appearanceMenu.hidden = shareMenu.hidden = true;
+  closePageMenu();
   for (const pane of panes) if (pane.active?.mode === "source") autosizeSource(pane.active);
 });
 
@@ -1540,10 +2489,9 @@ async function restoreSession(saved: Session | null) {
 
 async function init() {
   applyTheme(theme);
-  document.documentElement.dataset.font = docFont;
   installTableDrag();
-  document.documentElement.dataset.size = docSize;
-  document.documentElement.dataset.width = pageWidth;
+  // Keeps "Edited 5m ago" current.
+  setInterval(() => panes.forEach(renderHead), 60_000);
   if (localStorage.getItem("sidebarCollapsed") === "true") app.classList.add("sidebar-collapsed");
   setSidebarWidth(Number(localStorage.getItem("sidebarWidth")) || SIDEBAR_DEFAULT);
   setSplitRatio(Number(localStorage.getItem("splitRatio")) || 0.5);
@@ -1596,7 +2544,7 @@ async function init() {
   const pending = await invoke<string | null>("take_pending_file");
   if (pending) await openPath(pending);
   else await welcome();
-  await refreshFolder();
+  await refreshFolders();
   checkForUpdates();
 }
 

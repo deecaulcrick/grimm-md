@@ -2,6 +2,11 @@ import {
   AppWindow,
   Bold,
   Captions,
+  Check,
+  ChevronDown,
+  Copy,
+  EyeOff,
+  SquarePen,
   GripHorizontal,
   Code,
   GripVertical,
@@ -70,6 +75,16 @@ export const toolbarIcons = {
   codeIcon: svg(Code),
   linkIcon: svg(Link),
 };
+
+/** Lucide replacements for the code block header: language picker, copy and the source toggle. */
+export const codeBlockIcons = {
+  expandIcon: svg(ChevronDown),
+  copyIcon: svg(Copy),
+  previewToggleIcon: (previewOnly: boolean) => svg(previewOnly ? SquarePen : EyeOff),
+};
+
+/** Swapped into a code block's copy button for a moment after it copies. */
+export const copiedIcon = svg(Check);
 
 /** Lucide replacements for the table's handles and its row and column menus. */
 export const tableIcons = {

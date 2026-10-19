@@ -23,8 +23,9 @@ window.addEventListener("message", (event) => {
 });
 
 const REPORT_HEIGHT = `<script>
-  const report = () => parent.postMessage({ grimmEmbedHeight: document.documentElement.scrollHeight }, "*");
-  new ResizeObserver(report).observe(document.documentElement);
+  // The body, not the page: a page is never shorter than its frame, so short embeds could never shrink.
+  const report = () => parent.postMessage({ grimmEmbedHeight: Math.ceil(document.body.getBoundingClientRect().height) }, "*");
+  new ResizeObserver(report).observe(document.body);
   addEventListener("load", report);
 </script>`;
 
@@ -38,7 +39,7 @@ function buildFrame(content: string): HTMLIFrameElement {
   frame.setAttribute("allowfullscreen", "");
   frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
     html { color-scheme: ${document.documentElement.dataset.scheme ?? "light"}; }
-    body { margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: ${root.getPropertyValue("--text")}; }
+    body { display: flow-root; margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: ${root.getPropertyValue("--text")}; }
     iframe, img, video { max-width: 100%; }
   </style></head><body>${content}${REPORT_HEIGHT}</body></html>`;
   return frame;

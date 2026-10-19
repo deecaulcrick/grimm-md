@@ -32,15 +32,17 @@ Everything Grimm can do, in one place. Reopen this list any time from the **Help
 - **Outline.** In a note with a few headings, a small stack of lines appears at the right edge. Hover it to see the outline and click a heading to jump there.
 - **Tabs.** Keep several notes open at once.
 - **Split view.** Two panes side by side, each with its own tabs. Drag the divider to resize.
-- **Sidebar.** Open a folder to browse its Markdown files, with your recent files underneath. Drag its edge to resize, or hide it.
+- **Sidebar.** Search your notes with ⌘K. Favorites, Folders, Shared and Recents each fold away by their heading. Open or create as many folders as you like with the **+** beside Folders; hover a folder for **+** (new note) and **…**.
+- **Favorites.** Star a note from its header to keep it at the top of the sidebar.
+- **Rename and move.** Double-click a note's name to rename it; drag it onto a folder to move it. Its images, star, settings and shared link come along. Drag its edge to resize, or hide it; while hidden, hover its icon to peek.
 - **Session restore.** The tabs and panes you had open come back at the next launch.
 
 ## Appearance
 
-- **Eighteen themes.** Nine light (Meadow, Lilac, Paper, Sepia, Fog, Contrast, Riso, Bubblegum, Lagoon) and nine dark (Grimm, Merlot, Iron, Midnight, Graphite, Nightshift, Contrast Dark, Jungle, Ultraviolet).
-- **Three typefaces.** Serif, sans or mono for the page.
-- **Three text sizes.** Small, normal or large.
-- **Page width.** A centred column, or the full width of the window.
+- **Six themes.** Meadow, Fog and Paper for the day; Grimm, Graphite and Nightshift for the night.
+- **Per-note layout.** Each note picks its own typeface (serif, sans or mono), text size and width from its **…** menu.
+- **Ink and highlighter.** Select text to colour it, highlight it, or both, from nine colours.
+- **Lock page.** Stops a note from being edited by accident.
 - Follows your Mac's light or dark setting the first time you open it.
 
 ## Your files
@@ -69,6 +71,7 @@ Everything Grimm can do, in one place. Reopen this list any time from the **Help
 | ⇧⌘] and ⇧⌘[ | Next and previous tab |
 | ⇧⌘\ | Split view on or off |
 | ⌘\ | Sidebar on or off |
+| ⌘K | Search notes |
 | ⌘/ | Markdown source on or off |
 | ⌘Z and ⇧⌘Z | Undo and redo |
 | ⌘B, ⌘I, ⌘E | Bold, italic, inline code |

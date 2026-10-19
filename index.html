@@ -8,28 +8,28 @@
   <body>
     <div id="app">
       <aside id="sidebar">
-        <div class="sidebar-top" data-tauri-drag-region></div>
+        <div class="sidebar-top" data-tauri-drag-region>
+          <button id="btn-sidebar" class="icon-btn" title="Close sidebar (⌘\)"><i data-lucide="panel-left"></i></button>
+          <span class="sidebar-gap" data-tauri-drag-region></span>
+          <button id="btn-compose" class="icon-btn" title="New note (⌘N)"><i data-lucide="square-pen"></i></button>
+        </div>
+        <label class="side-search">
+          <i data-lucide="search"></i>
+          <input id="side-search" placeholder="Search notes" spellcheck="false" autocomplete="off" />
+          <kbd>⌘K</kbd>
+        </label>
         <nav class="sidebar-actions">
-          <button id="btn-new" class="nav-item"><i data-lucide="plus"></i><span>New document</span><kbd>⌘N</kbd></button>
           <button id="btn-open" class="nav-item"><i data-lucide="file-text"></i><span>Open file</span><kbd>⌘O</kbd></button>
           <button id="btn-folder" class="nav-item"><i data-lucide="folder-open"></i><span>Open folder</span><kbd>⇧⌘O</kbd></button>
         </nav>
         <div class="sidebar-scroll">
-          <section id="folder-section" hidden>
-            <header>
-              <h2 id="folder-name"></h2>
-              <button id="btn-close-folder" class="icon-btn small" title="Close folder"><i data-lucide="x"></i></button>
-            </header>
-            <ul id="folder-list" class="file-list"></ul>
-          </section>
-          <section id="recent-section" hidden>
-            <header><h2>Recents</h2></header>
-            <ul id="recent-list" class="file-list"></ul>
-          </section>
+          <div id="side-sections"></div>
+          <p id="search-empty" class="search-empty" hidden>No notes match</p>
         </div>
-        <nav class="sidebar-foot">
-          <button id="btn-help" class="nav-item"><i data-lucide="circle-question-mark"></i><span>Help</span></button>
-        </nav>
+        <footer class="sidebar-foot">
+          <button id="btn-help" class="nav-item foot-help"><i data-lucide="circle-question-mark"></i><span>Help</span></button>
+          <button id="btn-theme" class="icon-btn" title="Theme"><i data-lucide="palette"></i></button>
+        </footer>
       </aside>
 
       <div id="sidebar-resizer" title="Drag to resize, double-click to reset"></div>
@@ -44,6 +44,7 @@
     </div>
     <div id="appearance" hidden></div>
     <div id="share-menu" hidden></div>
+    <div id="shared-pages" hidden></div>
     <div id="toast" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

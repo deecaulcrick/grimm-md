@@ -39,22 +39,28 @@
   color-scheme: light;
 }
 
-:root[data-font="sans"] {
+[data-font="sans"] {
   --doc-font: var(--sans);
   --doc-base: 15.5px;
 }
 
-:root[data-font="mono"] {
+[data-font="mono"] {
   --doc-font: var(--mono);
   --doc-base: 14.5px;
 }
 
-:root[data-size="small"] {
+[data-size="small"] {
   --doc-scale: 0.9;
 }
 
-:root[data-size="large"] {
+[data-size="large"] {
   --doc-scale: 1.15;
+}
+
+/* Each note sets these on itself, so the size is worked out again there. */
+[data-font],
+[data-size] {
+  --doc-size: calc(var(--doc-base) * var(--doc-scale));
 }
 
 :root[data-scheme="dark"] {
@@ -191,13 +197,77 @@ body.resizing iframe {
   pointer-events: none;
 }
 
+/* Same height as the tab bar, so the traffic lights sit centred across both. */
 .sidebar-top {
-  height: var(--bar-h);
+  height: 40px;
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  width: var(--sidebar-w);
+}
+
+.overlay-titlebar .sidebar-top {
+  padding-left: 78px;
+}
+
+.sidebar-gap {
+  flex: 1;
+  align-self: stretch;
+}
+
+.sidebar-top .icon-btn,
+.sidebar-foot .icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.side-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: 4px 8px 6px;
+  padding: 0 8px 0 10px;
+  width: calc(var(--sidebar-w) - 16px);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-3);
+}
+
+.side-search:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.side-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.side-search input::placeholder {
+  color: var(--text-3);
+}
+
+.side-search kbd {
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--hover);
 }
 
 .sidebar-actions {
-  padding: 4px 8px 8px;
+  padding: 2px 8px 4px;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -207,20 +277,185 @@ body.resizing iframe {
 .sidebar-foot {
   flex: none;
   display: flex;
-  flex-direction: column;
-  padding: 6px 8px 10px;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
   width: var(--sidebar-w);
+  border-top: 1px solid var(--border);
+}
+
+.foot-help {
+  flex: 1;
+}
+
+/* Sidebar sections fold away by their header; the chevron shows on hover. */
+.section-fold {
+  min-width: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border-radius: 5px;
+}
+
+.section-fold:hover {
+  background: var(--hover);
+}
+
+.section-fold .lucide {
+  width: 12px;
+  height: 12px;
+  color: var(--text-3);
+  opacity: 0;
+  transition: transform 0.15s, opacity 0.12s;
+}
+
+.side-section header:hover .section-fold .lucide {
+  opacity: 1;
+}
+
+.side-section.collapsed .section-fold .lucide {
+  opacity: 1;
+  transform: rotate(-90deg);
+}
+
+.side-section header .row-action {
+  opacity: 0;
+}
+
+.side-section header:hover .row-action {
+  opacity: 1;
+}
+
+/* Folder rows: the folder icon becomes a chevron on hover, Notion-style, and
+   "+" and "…" appear at the right. */
+.row-glyph {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.row-glyph .lucide {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  color: var(--text-3);
+  transition: opacity 0.1s, transform 0.15s;
+}
+
+.row-glyph .lucide:nth-child(2) {
+  opacity: 0;
+}
+
+.dir-row:not(.search-dir):hover .row-glyph .lucide:first-child {
+  opacity: 0;
+}
+
+.dir-row:not(.search-dir):hover .row-glyph .lucide:nth-child(2) {
+  opacity: 1;
+}
+
+.dir-row.expanded .row-glyph .lucide:nth-child(2) {
+  transform: rotate(90deg);
+}
+
+.row-actions {
+  display: flex;
+  gap: 2px;
+  margin-right: -4px;
+  opacity: 0;
+}
+
+.file-list li:hover .row-actions,
+.row-actions:focus-within {
+  opacity: 1;
+}
+
+/* A folder a dragged note will be moved into. */
+.file-list li.drop-into {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  color: var(--text);
+}
+
+/* Renaming in place, in the header or a sidebar row. */
+.rename-input {
+  flex: 1;
+  min-width: 60px;
+  height: 24px;
+  margin: 0 -4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  outline: none;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  font: inherit;
+  color: var(--text);
+}
+
+.crumbs .rename-input {
+  flex: 0 1 240px;
+}
+
+.crumbs .crumb:last-of-type {
+  cursor: text;
+  border-radius: 4px;
+}
+
+.crumbs .crumb:last-of-type:hover {
+  background: var(--hover);
+}
+
+.row-action.icon-btn.small {
+  width: 22px;
+  height: 22px;
+  color: var(--text-3);
+}
+
+.row-action.icon-btn.small:hover {
+  color: var(--text);
+  background: var(--active);
+}
+
+.file-list li.more-row,
+.file-list li.add-folder {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.file-list li.add-folder:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.star-btn.starred {
+  color: var(--accent);
+}
+
+.star-btn.starred .lucide {
+  fill: currentColor;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
   text-align: left;
   white-space: nowrap;
+  color: var(--text-2);
+}
+
+.nav-item .lucide {
+  color: var(--text-3);
 }
 
 .nav-item span {
@@ -237,6 +472,7 @@ body.resizing iframe {
 
 .nav-item:hover {
   background: var(--hover);
+  color: var(--text);
 }
 
 .nav-item:hover kbd {
@@ -247,10 +483,15 @@ body.resizing iframe {
   background: var(--active);
 }
 
+.more-row {
+  width: 100%;
+  color: var(--text-3);
+}
+
 .sidebar-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 8px 16px;
+  padding: 0 8px 16px;
   width: var(--sidebar-w);
 }
 
@@ -262,7 +503,8 @@ body.resizing iframe {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px 4px 10px;
+  gap: 4px;
+  padding: 0 2px 2px 8px;
   height: 26px;
 }
 
@@ -276,39 +518,57 @@ body.resizing iframe {
   white-space: nowrap;
 }
 
+.search-empty {
+  margin: 16px 8px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
 .file-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
+/* One line per note, with an icon, as in Notion's sidebar. */
 .file-list li {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 32px;
-  padding: 5px 10px;
-  border-radius: 8px;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px 0 calc(8px + var(--depth, 0) * 16px);
+  border-radius: 6px;
   cursor: default;
+  color: var(--text-2);
+}
+
+.file-list li > .lucide {
+  width: 15px;
+  height: 15px;
+  color: var(--text-3);
 }
 
 .file-list li:hover {
   background: var(--hover);
+  color: var(--text);
 }
 
 .file-list li.open {
-  background: var(--hover);
+  color: var(--text);
 }
 
 .file-list li.current {
-  background: var(--accent-soft);
+  background: var(--active);
+  color: var(--text);
 }
 
-.file-list li.current .name {
-  font-weight: 500;
+.file-list li.current > .lucide {
+  color: var(--accent);
 }
 
 .file-list .name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -316,27 +576,59 @@ body.resizing iframe {
 }
 
 .file-list .dir {
+  flex: none;
+  max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11.5px;
   color: var(--text-3);
-  direction: rtl;
-  text-align: left;
 }
 
 .file-list .empty {
   color: var(--text-3);
   font-size: 13px;
+  padding-left: calc(31px + (var(--depth, 1) - 1) * 16px);
 }
 
 .file-list .empty:hover {
   background: none;
 }
 
+/* Peeking: the closed sidebar floats over the page while the pointer is on it. */
+#app.sidebar-peek #sidebar {
+  position: fixed;
+  z-index: 45;
+  top: 44px;
+  left: 8px;
+  bottom: 8px;
+  width: var(--sidebar-w);
+  border: 0;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--border), 0 16px 40px rgba(0, 0, 0, 0.22);
+  animation: peek-in 0.14s ease-out;
+}
+
+#app.sidebar-peek #sidebar .sidebar-top {
+  display: none;
+}
+
+#app.sidebar-peek #sidebar .side-search {
+  margin-top: 8px;
+}
+
+@keyframes peek-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+
 /* ---------- Panes ---------- */
 
 #main {
+  /* Fixed to its column, so it stays put while the sidebar floats (peek). */
+  grid-column: 2;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -380,21 +672,111 @@ body.resizing iframe {
   background: var(--border);
 }
 
+/* The tab strip, Notion-style: tabs sit on the window chrome and the active
+   one joins the note's header below it. */
 .pane-bar {
-  height: var(--bar-h);
+  height: 40px;
   flex: none;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 8px;
+  background: var(--sidebar);
   user-select: none;
   -webkit-user-select: none;
   transition: padding-left 0.2s ease;
 }
 
+.pane-bar > .icon-btn,
+.pane-actions {
+  align-self: center;
+}
+
 /* Leave room for the macOS traffic lights when the sidebar is hidden. */
 #app.sidebar-collapsed.overlay-titlebar .pane:first-child .pane-bar {
-  padding-left: 84px;
+  padding-left: 78px;
+}
+
+/* ---------- Note header ---------- */
+
+.page-head {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px 0 18px;
+  font-size: 14px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.page-head:empty {
+  display: none;
+}
+
+.crumbs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.crumb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb:last-of-type {
+  color: var(--text);
+}
+
+.crumb-sep {
+  color: var(--text-3);
+}
+
+.crumbs .crumb-lock {
+  width: 13px;
+  height: 13px;
+  color: var(--text-3);
+}
+
+.head-gap {
+  flex: 1;
+}
+
+.edited {
+  margin-right: 6px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.head-btn {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.head-btn:hover {
+  background: var(--hover);
+}
+
+.head-btn.on .lucide {
+  color: var(--accent);
+}
+
+.page-head .icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
 }
 
 .icon-btn {
@@ -439,38 +821,59 @@ body.resizing iframe {
 .tabs {
   flex: 1;
   min-width: 0;
-  height: 100%;
   display: flex;
-  align-items: center;
-  gap: 2px;
+  align-items: stretch;
   overflow: hidden;
 }
 
 .tab {
-  flex: 0 1 190px;
-  min-width: 44px;
-  height: 30px;
+  position: relative;
+  flex: 0 1 180px;
+  min-width: 56px;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 5px 0 12px;
-  border-radius: 8px;
-  color: var(--text-3);
+  gap: 6px;
+  padding: 0 5px 0 10px;
+  color: var(--text-2);
   font-size: 13px;
 }
 
+.tab > .lucide {
+  width: 14px;
+  height: 14px;
+  color: var(--text-3);
+}
+
+/* Hairlines between inactive tabs, as in Notion's tab strip. */
+.tab + .tab::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.tab.active::before,
+.tab.active + .tab::before {
+  display: none;
+}
+
 .tab:hover {
-  color: var(--text-2);
+  color: var(--text);
+}
+
+.tab:not(.active):hover {
   background: var(--hover);
 }
 
 .tab.active {
-  background: var(--accent-soft);
+  background: var(--bg);
   color: var(--text);
 }
 
 .pane:not(.focused) .tab.active {
-  background: var(--hover);
   color: var(--text-2);
 }
 
@@ -528,7 +931,8 @@ body.resizing iframe {
 }
 
 .tab-new {
-  margin-left: 2px;
+  align-self: center;
+  margin-left: 4px;
   color: var(--text-3);
 }
 
@@ -590,10 +994,10 @@ body.dragging-tab .toc {
 }
 
 .pane-actions {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 2px;
-  flex: none;
 }
 
 /* ---------- Document ---------- */
@@ -625,7 +1029,7 @@ body.dragging-tab .toc {
   flex-direction: column;
 }
 
-:root[data-width="full"] .page {
+[data-width="full"] .page {
   max-width: 100%;
 }
 
@@ -913,16 +1317,205 @@ body.resizing .toc {
   color: var(--text);
 }
 
+/* ---------- Code blocks ---------- */
+
 .editor .milkdown .milkdown-code-block {
   border-radius: 10px;
   margin: 1em 0;
+  padding: 6px 14px 14px;
   font-size: 13.5px;
   background: var(--code-block);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow 0.14s var(--ease);
+}
+
+.editor .milkdown .milkdown-code-block:focus-within {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.editor .milkdown .milkdown-code-block.selected {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 
 .editor .milkdown .milkdown-code-block .cm-editor,
 .editor .milkdown .milkdown-code-block .cm-gutters {
   background: transparent;
+}
+
+/* The header: language on the left, copy and the source toggle on the right.
+   It stays out of the way until the block is hovered or being edited. */
+.editor .milkdown .milkdown-code-block .tools {
+  min-height: 28px;
+  margin: 0 -6px 4px;
+  font-family: var(--sans);
+}
+
+.editor .milkdown .milkdown-code-block .tools .language-button,
+.editor .milkdown .milkdown-code-block .tools .tools-button-group button {
+  height: 26px;
+  margin: 0;
+  padding: 0 8px;
+  gap: 5px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: default;
+  opacity: 0;
+  transition: opacity 0.16s var(--ease), background 0.14s var(--ease), color 0.14s var(--ease),
+    transform 0.14s var(--ease);
+}
+
+.editor .milkdown .milkdown-code-block .tools .language-button {
+  padding-right: 4px;
+}
+
+.editor .milkdown .milkdown-code-block .tools .tools-button-group {
+  gap: 1px;
+}
+
+.editor .milkdown .milkdown-code-block:is(:hover, :focus-within, .selected) .tools .language-button,
+.editor .milkdown .milkdown-code-block:is(:hover, :focus-within, .selected) .tools .tools-button-group button,
+.editor .milkdown .milkdown-code-block .tools :is(.language-button, button):focus-visible,
+.editor .milkdown .milkdown-code-block .tools .language-button[data-expanded="true"],
+.editor .milkdown .milkdown-code-block .tools .copy-button.copied {
+  opacity: 1;
+}
+
+.editor .milkdown .milkdown-code-block .tools .language-button:hover,
+.editor .milkdown .milkdown-code-block .tools .language-button[data-expanded="true"],
+.editor .milkdown .milkdown-code-block .tools .tools-button-group button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.editor .milkdown .milkdown-code-block .tools .tools-button-group button:active {
+  background: var(--active);
+  transform: scale(0.96);
+}
+
+.editor .milkdown .milkdown-code-block .tools .copy-button.copied {
+  color: var(--text);
+}
+
+.editor .milkdown .milkdown-code-block .tools .milkdown-icon {
+  display: grid;
+}
+
+/* The toggle's icon and label arrive together inside one icon element. */
+.editor .milkdown .milkdown-code-block .tools .preview-toggle-button .milkdown-icon {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.editor .milkdown .milkdown-code-block .tools .tools-button-group button svg,
+.editor .milkdown .milkdown-code-block .tools .language-button .expand-icon svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  color: inherit;
+}
+
+.editor .milkdown .milkdown-code-block .tools .language-button .expand-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* The language list, styled like the editor's other menus. */
+.editor .milkdown .milkdown-code-block .language-picker {
+  padding-top: 4px;
+  font-family: var(--sans);
+}
+
+.editor .milkdown .milkdown-code-block .list-wrapper {
+  width: 220px;
+  padding-top: 8px;
+  border-radius: 11px;
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--border), 0 2px 6px rgba(0, 0, 0, 0.08), 0 10px 28px rgba(0, 0, 0, 0.18);
+  animation: pop-in 0.16s var(--ease-pop);
+}
+
+.editor .milkdown .milkdown-code-block .search-box {
+  margin: 0 8px 6px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  outline: none;
+  background: var(--hover);
+}
+
+.editor .milkdown .milkdown-code-block .search-box:has(input:focus) {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+
+.editor .milkdown .milkdown-code-block .search-box input {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.editor .milkdown .milkdown-code-block .search-box .clear-icon svg {
+  fill: none;
+  color: var(--text-3);
+}
+
+.editor .milkdown .milkdown-code-block .language-list {
+  height: 320px;
+  padding: 0 4px 4px;
+}
+
+.editor .milkdown .milkdown-code-block .language-list-item {
+  padding: 4px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: default;
+}
+
+.editor .milkdown .milkdown-code-block .language-list-item:is(:hover, :focus-visible) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Showing or hiding the source eases its height instead of jumping: the host
+   stays laid out and collapses its only row, rather than being removed. */
+.editor .milkdown .milkdown-code-block .codemirror-host {
+  display: grid !important;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  transition: grid-template-rows 0.22s var(--ease), opacity 0.18s var(--ease), visibility 0s;
+}
+
+.editor .milkdown .milkdown-code-block .codemirror-host > * {
+  min-height: 0;
+}
+
+.editor .milkdown .milkdown-code-block .codemirror-host.hidden {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 0.22s var(--ease), opacity 0.14s var(--ease), visibility 0s 0.22s;
+}
+
+/* With the source open, a hairline separates it from the result below. */
+.editor .milkdown .milkdown-code-block .preview-panel {
+  border-top: 1px solid transparent;
+  transition: border-color 0.18s var(--ease), padding 0.22s var(--ease), margin 0.22s var(--ease);
+}
+
+.editor .milkdown .milkdown-code-block .codemirror-host:not(.hidden) + .preview-panel {
+  margin-top: 10px;
+  padding-top: 4px;
+  border-top-color: var(--border);
 }
 
 .editor .milkdown .ProseMirror table {
@@ -1388,11 +1981,6 @@ body.resizing .toc {
 .editor .milkdown .milkdown-code-block .preview-panel .preview-divider,
 .editor .milkdown .milkdown-code-block .preview-panel .preview-label {
   display: none;
-}
-
-.editor .milkdown .milkdown-code-block .preview-toggle-button {
-  font-family: var(--sans);
-  font-size: 12px;
 }
 
 /* Floating UI (toolbar, slash menu, tooltips) stays in the app's sans font. */
@@ -1905,6 +2493,119 @@ button.share-row:hover:not(:disabled) {
   opacity: 0.6;
 }
 
+.share-all {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-2);
+  text-align: left;
+}
+
+.share-all:hover {
+  color: var(--text);
+}
+
+/* ---------- Shared pages ---------- */
+
+#shared-pages {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: start center;
+  padding: 12vh 16px 16px;
+  background: rgba(0, 0, 0, 0.28);
+  animation: fade-in 0.15s var(--ease);
+}
+
+.sp-panel {
+  width: min(520px, 100%);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--border), 0 18px 50px rgba(0, 0, 0, 0.25);
+  animation: pop-in 0.18s var(--ease-pop);
+}
+
+.sp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.sp-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px;
+  overflow-y: auto;
+}
+
+.sp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+}
+
+.sp-row:hover {
+  background: var(--hover);
+}
+
+.sp-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.sp-main:disabled .sp-title {
+  color: var(--text-2);
+}
+
+.sp-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-meta {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+}
+
+.sp-row:hover .sp-actions,
+.sp-actions:focus-within {
+  opacity: 1;
+}
+
+.sp-empty {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
 .menu-label {
   font-size: 11.5px;
   font-weight: 500;
@@ -2044,6 +2745,18 @@ button.share-row:hover:not(:disabled) {
 }
 
 /* ---------- Scrollbars ---------- */
+
+/* WebKit paints a scrolled note's scrollbar on its own layer, above any
+   overlay that has none, so it showed through dialogs. Each overlay gets a
+   layer of its own to stay on top. */
+#shared-pages,
+#share-menu,
+#appearance,
+.page-menu,
+.sel-toolbar,
+.sel-sub {
+  will-change: transform;
+}
 
 ::-webkit-scrollbar {
   width: 10px;
@@ -2238,4 +2951,447 @@ button.share-row:hover:not(:disabled) {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---------- Page menu ---------- */
+
+.page-menu {
+  position: fixed;
+  z-index: 60;
+  width: 284px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--border), 0 12px 32px rgba(0, 0, 0, 0.18);
+  font-size: 14px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.menu-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: 2px 2px 0;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text-3);
+}
+
+.menu-search:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.menu-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  font: inherit;
+  color: var(--text);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
+.menu-row {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border-radius: 6px;
+  text-align: left;
+  color: var(--text);
+}
+
+.menu-row:hover {
+  background: var(--hover);
+}
+
+.menu-row > .lucide {
+  color: var(--text-2);
+}
+
+.menu-text {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.menu-hint {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.switch {
+  position: relative;
+  width: 30px;
+  height: 18px;
+  flex: none;
+  border-radius: 9px;
+  background: var(--border-strong);
+  transition: background 0.15s;
+}
+
+.switch i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s;
+}
+
+.switch.on {
+  background: var(--accent);
+}
+
+.switch.on i {
+  transform: translateX(12px);
+}
+
+.menu-foot {
+  padding: 4px 8px 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.menu-foot-label {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.font-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 0 2px;
+}
+
+.menu-sizes {
+  margin: 6px 2px 2px;
+}
+
+.font-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 6px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.font-tile:hover {
+  background: var(--hover);
+}
+
+.font-tile.selected {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.font-sample {
+  font-family: var(--doc-font);
+  font-size: 22px;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+/* ---------- Selection toolbar ---------- */
+
+.sel-toolbar,
+.sel-sub {
+  position: fixed;
+  z-index: 70;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--border), 0 10px 28px rgba(0, 0, 0, 0.18);
+  font-family: var(--sans);
+  font-size: 14px;
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sel-toolbar {
+  width: 212px;
+}
+
+.sel-kind {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.sel-kind span {
+  flex: 1;
+}
+
+.sel-kind:hover,
+.sel-btn:hover,
+.sel-row:hover {
+  background: var(--hover);
+}
+
+.sel-sep {
+  height: 1px;
+  margin: 5px 2px;
+  background: var(--border);
+}
+
+.sel-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+}
+
+.sel-btn {
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-2);
+}
+
+.sel-btn.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+
+.sel-sub {
+  width: 220px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+.sel-label {
+  padding: 6px 8px 4px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.sel-row {
+  width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.sel-row > .lucide {
+  color: var(--text-2);
+}
+
+.sel-row.on {
+  background: var(--accent-soft);
+}
+
+
+/* ---------- Text colours and highlights ---------- */
+
+/* Grimm's own palette: clear inks for text, and the same hues as highlighter
+   tints. Each theme scheme gets values that read well on it. */
+:root {
+  --c-rose: #c92a5c;
+  --c-coral: #d9480f;
+  --c-amber: #b07500;
+  --c-olive: #5c8a0d;
+  --c-teal: #0b7f8c;
+  --c-sky: #1b6fc4;
+  --c-iris: #6543d6;
+  --c-plum: #a43bbd;
+  --c-slate: #5b6672;
+  --c-tint: 34%;
+}
+
+:root[data-scheme="dark"] {
+  --c-rose: #f78fb3;
+  --c-coral: #ff9f5a;
+  --c-amber: #f5c84c;
+  --c-olive: #b4e05a;
+  --c-teal: #5fd4e0;
+  --c-sky: #82c0ff;
+  --c-iris: #b8a3ff;
+  --c-plum: #e7a1f7;
+  --c-slate: #b3bcc6;
+  --c-tint: 38%;
+}
+
+span[data-color] {
+  color: var(--ink);
+}
+
+/* A highlighter stroke across the lower part of the line, not a solid box. */
+mark[data-color] {
+  color: inherit;
+  background: linear-gradient(
+    transparent 40%,
+    color-mix(in srgb, var(--ink) var(--c-tint), transparent) 40%,
+    color-mix(in srgb, var(--ink) var(--c-tint), transparent) 92%,
+    transparent 92%
+  );
+  padding: 0 0.12em;
+  margin: 0 -0.04em;
+  border-radius: 0.2em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+[data-color="rose"],
+[data-ink="rose"],
+[data-tint="rose"] {
+  --ink: var(--c-rose);
+}
+
+[data-color="coral"],
+[data-ink="coral"],
+[data-tint="coral"] {
+  --ink: var(--c-coral);
+}
+
+[data-color="amber"],
+[data-ink="amber"],
+[data-tint="amber"] {
+  --ink: var(--c-amber);
+}
+
+[data-color="olive"],
+[data-ink="olive"],
+[data-tint="olive"] {
+  --ink: var(--c-olive);
+}
+
+[data-color="teal"],
+[data-ink="teal"],
+[data-tint="teal"] {
+  --ink: var(--c-teal);
+}
+
+[data-color="sky"],
+[data-ink="sky"],
+[data-tint="sky"] {
+  --ink: var(--c-sky);
+}
+
+[data-color="iris"],
+[data-ink="iris"],
+[data-tint="iris"] {
+  --ink: var(--c-iris);
+}
+
+[data-color="plum"],
+[data-ink="plum"],
+[data-tint="plum"] {
+  --ink: var(--c-plum);
+}
+
+[data-color="slate"],
+[data-ink="slate"],
+[data-tint="slate"] {
+  --ink: var(--c-slate);
+}
+
+/* The colour picker: letters for text colours, highlighter dabs for highlights. */
+.sel-colors {
+  width: auto;
+  padding: 8px 10px 10px;
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 30px);
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.swatch {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.swatch.ink {
+  color: var(--ink, var(--text));
+  background: var(--hover);
+}
+
+.swatch.tint {
+  background: color-mix(in srgb, var(--ink) calc(var(--c-tint) + 10%), transparent);
+}
+
+.swatch.none.tint {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--border-strong);
+}
+
+.swatch.none.tint::after {
+  content: "";
+  width: 16px;
+  height: 1.5px;
+  background: var(--text-3);
+  transform: rotate(-45deg);
+}
+
+.swatch:hover {
+  transform: scale(1.08);
+}
+
+.swatch.on {
+  box-shadow: 0 0 0 2px var(--elevated), 0 0 0 3.5px var(--text-2);
+}
+
+.sel-color-glyph {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding-bottom: 3px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink, var(--text));
+}
+
+.sel-color-bar {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 1px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.sel-color-bar[data-tint] {
+  background: color-mix(in srgb, var(--ink) 70%, transparent);
 }

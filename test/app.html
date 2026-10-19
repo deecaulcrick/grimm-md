@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Grimm test harness</title>
+  </head>
+  <body>
+    <!-- Grimm's own page, with Tauri swapped for an in-memory backend (fakeTauri.ts).
+         Open /test/app.html on the dev server; it is not part of the app build. -->
+    <script type="module">
+      import { installFakeTauri } from "/test/fakeTauri.ts";
+      const page = new DOMParser().parseFromString(await (await fetch("/index.html")).text(), "text/html");
+      for (const script of page.body.querySelectorAll("script")) script.remove();
+      document.body.innerHTML = page.body.innerHTML;
+      installFakeTauri();
+      await import("/src/main.ts");
+    </script>
+  </body>
+</html>

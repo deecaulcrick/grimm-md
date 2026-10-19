@@ -211,6 +211,82 @@ fn allow_image(app: tauri::AppHandle, path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Whether a note still exists, for listing shared pages whose file may have moved.
+#[tauri::command]
+fn file_exists(path: String) -> bool {
+    Path::new(&path).is_file()
+}
+
+/// Renames or moves a note. Never replaces another file: a name that is taken
+/// is refused, except a change of capitals only ("chapter.md" to "Chapter.md"),
+/// which on macOS is the same file. Between disks, where a plain rename cannot
+/// work, the note is copied and the original removed.
+#[tauri::command]
+fn rename_path(from: String, to: String) -> Result<(), String> {
+    move_note(Path::new(&from), Path::new(&to))
+}
+
+fn move_note(from: &Path, to: &Path) -> Result<(), String> {
+    if !from.is_file() {
+        return Err("the note is no longer there".into());
+    }
+    if !to.parent().is_some_and(Path::is_dir) {
+        return Err("that folder does not exist".into());
+    }
+    if from == to {
+        return Ok(());
+    }
+    let same_file = to.exists() && fs::canonicalize(from).ok() == fs::canonicalize(to).ok();
+    if to.exists() && !same_file {
+        let name = to.file_name().and_then(|n| n.to_str()).unwrap_or("that name");
+        return Err(format!("“{name}” already exists there"));
+    }
+    match fs::rename(from, to) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == ErrorKind::CrossesDevices => {
+            // Created fresh so a file that appeared meanwhile is still never replaced.
+            let bytes = fs::read(from).map_err(|e| e.to_string())?;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(to)
+                .map_err(|e| e.to_string())?;
+            file.write_all(&bytes).map_err(|e| e.to_string())?;
+            fs::remove_file(from).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Copies an image a note uses into the `assets` folder beside the note's new
+/// place, for a note that moved folders; returns the new relative path.
+#[tauri::command]
+fn copy_image(note: String, source: String) -> Result<String, String> {
+    let source = Path::new(&source);
+    image_extension(source).ok_or("that file is not an image")?;
+    let bytes = fs::read(source).map_err(|e| e.to_string())?;
+    let name = source.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+    write_image(Path::new(&note), name, &bytes)
+}
+
+/// Makes a new, empty folder for notes. Fails if something is already there.
+#[tauri::command]
+fn create_dir(path: String) -> Result<(), String> {
+    std::fs::create_dir(&path).map_err(|e| e.to_string())
+}
+
+/// When a note was last written, in milliseconds since the epoch, for the "Edited" label.
+#[tauri::command]
+fn modified_at(path: String) -> Result<u64, String> {
+    let modified = std::fs::metadata(&path)
+        .and_then(|meta| meta.modified())
+        .map_err(|e| e.to_string())?;
+    let since = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?;
+    Ok(since.as_millis() as u64)
+}
+
 #[tauri::command]
 fn take_pending_file(state: tauri::State<PendingFile>) -> Option<String> {
     state.0.lock().unwrap().take()
@@ -249,6 +325,7 @@ fn build_menu(
         .item(&item("save-as", "Save As…", "CmdOrCtrl+Shift+S")?)
         .separator()
         .text("share", "Share…")
+        .text("shared-pages", "Shared Pages…")
         .separator()
         .item(&item("close-tab", "Close Tab", "CmdOrCtrl+W")?)
         .build()?;
@@ -322,6 +399,11 @@ pub fn run() {
             fetch_page,
             save_image,
             allow_image,
+            file_exists,
+            modified_at,
+            create_dir,
+            rename_path,
+            copy_image,
             take_pending_file
         ])
         .build(tauri::generate_context!())
@@ -362,6 +444,76 @@ mod tests {
         assert!(write_image(&note, "script.sh", b"x").is_err());
         assert!(write_image(&note, "empty.png", b"").is_err());
         assert!(write_image(Path::new("note.md"), "a.png", b"x").is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("grimm-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn notes_are_renamed_and_moved() {
+        let dir = scratch("rename");
+        fs::create_dir_all(dir.join("drafts")).unwrap();
+        fs::write(dir.join("a.md"), "alpha").unwrap();
+
+        move_note(&dir.join("a.md"), &dir.join("b.md")).unwrap();
+        assert!(!dir.join("a.md").exists());
+        assert_eq!(fs::read_to_string(dir.join("b.md")).unwrap(), "alpha");
+
+        move_note(&dir.join("b.md"), &dir.join("drafts/b.md")).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("drafts/b.md")).unwrap(), "alpha");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_rename_never_replaces_another_note() {
+        let dir = scratch("clash");
+        fs::write(dir.join("a.md"), "alpha").unwrap();
+        fs::write(dir.join("b.md"), "beta").unwrap();
+
+        let err = move_note(&dir.join("a.md"), &dir.join("b.md")).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(fs::read_to_string(dir.join("a.md")).unwrap(), "alpha");
+        assert_eq!(fs::read_to_string(dir.join("b.md")).unwrap(), "beta");
+
+        assert!(move_note(&dir.join("gone.md"), &dir.join("c.md")).is_err());
+        assert!(move_note(&dir.join("a.md"), &dir.join("no-such-folder/a.md")).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_change_of_capitals_is_a_rename() {
+        let dir = scratch("case");
+        fs::write(dir.join("chapter.md"), "text").unwrap();
+        move_note(&dir.join("chapter.md"), &dir.join("Chapter.md")).unwrap();
+        let names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(names, ["Chapter.md"]);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn images_are_copied_beside_a_moved_note() {
+        let dir = scratch("copy-image");
+        fs::create_dir_all(dir.join("old/assets")).unwrap();
+        fs::create_dir_all(dir.join("new")).unwrap();
+        fs::write(dir.join("old/assets/cat.png"), b"cat").unwrap();
+        let note = dir.join("new/note.md").to_string_lossy().into_owned();
+        let source = dir.join("old/assets/cat.png").to_string_lossy().into_owned();
+
+        assert_eq!(copy_image(note.clone(), source.clone()).unwrap(), "assets/cat.png");
+        assert_eq!(fs::read(dir.join("new/assets/cat.png")).unwrap(), b"cat");
+        // The original stays: another note may still use it.
+        assert!(dir.join("old/assets/cat.png").exists());
+        // Copying again reuses the copy.
+        assert_eq!(copy_image(note.clone(), source).unwrap(), "assets/cat.png");
+        assert!(copy_image(note, dir.join("old/notes.txt").to_string_lossy().into_owned()).is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 }
