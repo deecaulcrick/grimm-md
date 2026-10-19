@@ -39,8 +39,10 @@ import {
   Columns2,
   FileText,
   FolderOpen,
+  GitCommitHorizontal,
   Globe,
   History as HistoryIcon,
+  Image as ImageIcon,
   Info,
   Palette,
   PanelLeft,
@@ -117,6 +119,8 @@ interface Doc {
   disk: string | null;
   // A newer file from outside that arrived while there were unsaved edits.
   conflict: { contents: string; hash: string } | null;
+  // Set for a note in a git repository; looked up again as the note changes.
+  git: GitInfo | null;
   pane: Pane;
   el: HTMLElement;
   noticeEl: HTMLElement;
@@ -157,6 +161,7 @@ const docPath = $("doc-path");
 const docStats = $("doc-stats");
 const appearanceMenu = $("appearance");
 const shareMenu = $("share-menu");
+const commitMenu = $("commit-menu");
 const sharedPagesEl = $("shared-pages");
 const sidebarEl = $("sidebar");
 const sideSearch = $<HTMLInputElement>("side-search");
@@ -344,7 +349,9 @@ function renderHead(pane: Pane) {
   }, "icon-btn more-btn");
   more.classList.toggle("on", !pageMenu.hidden && menuDoc === doc);
 
-  const items: HTMLElement[] = [crumbs, el("div", "head-gap"), edited, share];
+  const items: HTMLElement[] = [crumbs, el("div", "head-gap"), edited];
+  if (doc.git) items.push(commitButton(doc));
+  items.push(share);
   if (doc.path) {
     const path = doc.path;
     const starred = favorites.includes(path);
@@ -839,6 +846,7 @@ async function createDoc(pane: Pane, path: string | null, content: string, title
     baseline: "",
     disk: null,
     conflict: null,
+    git: null,
     pane,
     el: docEl,
     noticeEl,
@@ -947,6 +955,7 @@ async function openPath(
   const placeholder = pane.active && isPristine(pane.active) ? pane.active : null;
   const doc = await createDoc(pane, p, text);
   doc.disk = hash;
+  refreshGit(doc);
   if (placeholder) await closeDoc(placeholder, false);
   rememberRecent(p);
   render();
@@ -1049,6 +1058,7 @@ async function autosave(doc: Doc) {
   }
   autosaveFailed = false;
   doc.modified = Date.now();
+  refreshGit(doc, GIT_DELAY);
   // More was typed while the file was being written: that needs its own save.
   if (getContent(doc) !== contents) return scheduleAutosave(doc);
   if (doc.mode === "rich" && doc.crepe) doc.baseline = doc.crepe.getMarkdown();
@@ -1057,6 +1067,8 @@ async function autosave(doc: Doc) {
 
 // Leaving the window is a good moment to make sure everything is on disk.
 window.addEventListener("blur", () => allDocs().forEach(autosave));
+// A commit may have been made elsewhere meanwhile.
+window.addEventListener("focus", () => allDocs().forEach((doc) => refreshGit(doc)));
 
 async function saveDocument(doc: Doc | null, saveAs = false) {
   if (!doc) return;
@@ -1193,8 +1205,162 @@ function outsideRename({ from, to }: { from: string; to: string }) {
     localStorage.setItem("notePrefs", JSON.stringify(notePrefs));
   }
   moveShare(from, to);
+  refreshGit(doc);
   render();
   refreshFolders();
+}
+
+// ---------- git ----------
+
+interface GitInfo {
+  root: string;
+  branch: string | null;
+  /** The note's files that differ from the last commit. */
+  changed: string[];
+}
+
+// After a save, git is asked again once the writing has settled a little.
+const GIT_DELAY = 1500;
+const gitTimers = new WeakMap<Doc, number>();
+let commitDoc: Doc | null = null;
+let commitMessage = "";
+let commitBusy = false;
+
+/** What committing a note covers: the note, and the images on disk that it shows. */
+function noteFiles(doc: Doc): string[] {
+  if (!doc.path) return [];
+  const dir = dirOf(doc.path);
+  return [doc.path, ...localImageRefs(getContent(doc)).map((src) => resolveRelative(dir, src))];
+}
+
+async function gitInfo(doc: Doc): Promise<GitInfo | null> {
+  if (!doc.path || !inTauri) return null;
+  return invoke<GitInfo | null>("git_info", { note: doc.path, files: noteFiles(doc) }).catch(() => null);
+}
+
+/** Looks again at whether a note is in a git repository and what of it is uncommitted. */
+function refreshGit(doc: Doc, delay = 0) {
+  if (!inTauri) return;
+  window.clearTimeout(gitTimers.get(doc));
+  const timer = window.setTimeout(async () => {
+    const path = doc.path;
+    const git = await gitInfo(doc);
+    if (doc.path !== path || JSON.stringify(git) === JSON.stringify(doc.git)) return;
+    doc.git = git;
+    if (doc.pane.active === doc) renderHead(doc.pane);
+    if (commitDoc === doc && !commitMenu.hidden && !commitBusy) renderCommitMenu();
+  }, delay);
+  gitTimers.set(doc, timer);
+}
+
+function commitButton(doc: Doc): HTMLElement {
+  const changes = Boolean(doc.git?.changed.length) || doc.dirty;
+  const button = el("button", "head-btn commit-btn");
+  button.classList.toggle("on", changes);
+  button.title = changes ? "Commit this note (⌥⌘K)" : "No changes since the last commit";
+  button.append(icon(GitCommitHorizontal), Object.assign(el("span"), { textContent: "Commit" }));
+  button.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleCommit(doc, button);
+  });
+  return button;
+}
+
+function renderCommitMenu(error = "") {
+  const doc = commitDoc;
+  if (!doc?.path || !doc.git) return;
+  const { root, branch, changed } = doc.git;
+  const head = el("div", "share-head");
+  head.append(Object.assign(el("span", "share-title"), { textContent: "Commit" }));
+  if (branch) head.append(Object.assign(el("span", "commit-branch"), { textContent: branch, title: "Branch" }));
+  const intro = el("p", "share-intro");
+  intro.textContent = `Saves this note and its images to the git repository “${basename(root)}”. Nothing is pushed.`;
+  const children: HTMLElement[] = [head, intro];
+
+  // An edit not yet on disk is saved as the commit starts.
+  const files = doc.dirty || changed.includes(doc.path) ? [doc.path, ...changed.filter((f) => f !== doc.path)] : changed;
+  if (doc.conflict) {
+    children.push(Object.assign(el("p", "share-error"), { textContent: "This note changed outside Grimm. Choose which version to keep first." }));
+  } else if (!files.length) {
+    children.push(Object.assign(el("p", "commit-clean"), { textContent: "No changes since the last commit." }));
+  } else {
+    const list = el("ul", "commit-files");
+    for (const file of files) {
+      const row = el("li");
+      row.title = file;
+      row.append(icon(file === doc.path ? FileText : ImageIcon), Object.assign(el("span"), { textContent: file.slice(root.length + 1) }));
+      list.append(row);
+    }
+    const message = el("textarea", "commit-message");
+    message.rows = 2;
+    message.value = commitMessage;
+    message.placeholder = "What changed?";
+    message.disabled = commitBusy;
+    message.addEventListener("input", () => (commitMessage = message.value));
+    message.addEventListener("keydown", (e) => {
+      // Enter commits; Shift-Enter starts a new line of the message.
+      if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+      e.preventDefault();
+      runCommit();
+    });
+    children.push(list, message);
+    if (error) children.push(Object.assign(el("p", "share-error"), { textContent: error }));
+    const actions = el("div", "share-actions");
+    const commit = shareButton(commitBusy ? "Committing…" : "Commit", "share-primary", runCommit);
+    commit.disabled = commitBusy || !commitMessage.trim();
+    message.addEventListener("input", () => (commit.disabled = !commitMessage.trim()));
+    const cancel = shareButton("Cancel", "share-secondary", () => (commitMenu.hidden = true));
+    cancel.disabled = commitBusy;
+    actions.append(cancel, commit);
+    children.push(actions);
+  }
+  commitMenu.replaceChildren(...children);
+}
+
+async function toggleCommit(doc: Doc, anchor?: HTMLElement) {
+  if (!commitMenu.hidden && commitDoc === doc) return void (commitMenu.hidden = true);
+  if (!inTauri) return toast("Committing needs the desktop app");
+  if (!doc.path) return toast("Save this note first");
+  appearanceMenu.hidden = shareMenu.hidden = true;
+  closePageMenu();
+  window.clearTimeout(gitTimers.get(doc));
+  doc.git = await gitInfo(doc);
+  if (doc.pane.active === doc) renderHead(doc.pane);
+  if (!doc.git) return toast(`“${displayName(doc)}” isn't in a git repository`);
+  commitDoc = doc;
+  commitMessage = `Update ${displayName(doc)}`;
+  renderCommitMenu();
+  commitMenu.hidden = false;
+  // The header was drawn again above, so the button that was clicked may be gone.
+  const target = anchor?.isConnected ? anchor : doc.pane.headEl.querySelector<HTMLElement>(".commit-btn");
+  const rect = target?.getBoundingClientRect() ?? new DOMRect(window.innerWidth - 16, 40, 0, 0);
+  commitMenu.style.top = `${rect.bottom + 6}px`;
+  commitMenu.style.left = `${Math.max(8, rect.right - commitMenu.offsetWidth)}px`;
+  const message = commitMenu.querySelector<HTMLTextAreaElement>(".commit-message");
+  message?.focus();
+  message?.select();
+}
+
+async function runCommit() {
+  const doc = commitDoc;
+  if (!doc?.path || !doc.git || commitBusy || !commitMessage.trim()) return;
+  commitBusy = true;
+  renderCommitMenu();
+  let error = "";
+  try {
+    // The commit takes what is on disk, so the latest edits go there first.
+    await autosave(doc);
+    if (doc.dirty || doc.conflict) throw "the note couldn't be saved first";
+    const hash = await invoke<string>("git_commit", { note: doc.path, files: noteFiles(doc), message: commitMessage });
+    commitMenu.hidden = true;
+    toast(`Committed to ${doc.git.branch ?? "the repository"} · ${hash}`);
+  } catch (err) {
+    const text = String(err);
+    error = text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  commitBusy = false;
+  refreshGit(doc);
+  if (error) renderCommitMenu(error);
 }
 
 // ---------- version history ----------
@@ -1395,6 +1561,7 @@ async function relocate(from: string, to: string): Promise<boolean> {
 
   if (doc) {
     doc.path = to;
+    refreshGit(doc);
     doc.title = null;
     doc.modified = Date.now();
     const content = rewritten ?? reload;
@@ -1967,6 +2134,7 @@ function pageMenuItems(doc: Doc): MenuItem[][] {
   const page: MenuItem[] = [
     { label: record ? "Shared to web…" : "Share to web…", icon: record ? Globe : Share, run: () => toggleShare(doc) },
     ...(doc.path ? [{ label: "Version history…", icon: HistoryIcon, hint: "⌥⌘Y", run: () => showHistory(doc) }] : []),
+    ...(doc.git ? [{ label: "Commit…", icon: GitCommitHorizontal, hint: "⌥⌘K", run: () => toggleCommit(doc) }] : []),
     {
       label: "Lock page",
       icon: Lock,
@@ -2544,6 +2712,7 @@ const commands: Record<string, () => unknown> = {
   "shared-pages": openSharedPages,
   search: focusSearch,
   history: () => (historyOpen() ? closeHistory() : showHistory(focused.active)),
+  commit: () => focused.active && toggleCommit(focused.active),
 };
 
 // A shortcut can arrive both as a keydown and as a native menu event; the
@@ -2632,7 +2801,7 @@ sideSearch.addEventListener("blur", () => peekSidebar(false));
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    appearanceMenu.hidden = shareMenu.hidden = sharedPagesEl.hidden = rowMenu.hidden = true;
+    appearanceMenu.hidden = shareMenu.hidden = commitMenu.hidden = sharedPagesEl.hidden = rowMenu.hidden = true;
     closePageMenu();
   }
   const id = shortcut(e);
@@ -2644,13 +2813,14 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("mousedown", (e) => {
   if (!appearanceMenu.hidden && !appearanceMenu.contains(e.target as Node)) appearanceMenu.hidden = true;
   if (!shareMenu.hidden && !shareMenu.contains(e.target as Node)) shareMenu.hidden = true;
+  if (!commitMenu.hidden && !commitMenu.contains(e.target as Node)) commitMenu.hidden = true;
   const target = e.target as Node;
   if (!pageMenu.hidden && !pageMenu.contains(target)) closePageMenu();
   if (!rowMenu.hidden && !rowMenu.contains(target)) rowMenu.hidden = true;
 });
 
 window.addEventListener("resize", () => {
-  appearanceMenu.hidden = shareMenu.hidden = true;
+  appearanceMenu.hidden = shareMenu.hidden = commitMenu.hidden = true;
   closePageMenu();
   for (const pane of panes) if (pane.active?.mode === "source") autosizeSource(pane.active);
 });

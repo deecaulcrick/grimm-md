@@ -10,7 +10,8 @@ type Files = Record<string, string>;
 
 declare global {
   interface Window {
-    fakeFs: { files: Files; dirs: string[]; calls: string[] };
+    // `committed` is what a folder with a ".git" entry in `dirs` last committed.
+    fakeFs: { files: Files; dirs: string[]; calls: string[]; committed?: Files };
     fakeDialog: { open?: string | string[] | null; save?: string | null; ask?: boolean };
   }
 }
@@ -28,6 +29,12 @@ export function installFakeTauri() {
   const save = () => sessionStorage.setItem(KEY, JSON.stringify(fs));
   const isDir = (p: string) => fs.dirs.includes(p);
   const exists = (p: string) => p in fs.files || isDir(p);
+  const repoOf = (p: string) => {
+    for (let dir = dirOf(p); dir; dir = dirOf(dir)) if (isDir(`${dir}/.git`)) return dir;
+    return null;
+  };
+  const uncommitted = (root: string, paths: string[]) =>
+    paths.filter((p) => p.startsWith(`${root}/`) && fs.files[p] !== (fs.committed ??= {})[p]).sort();
   const fail = (message: string) => {
     throw message;
   };
@@ -89,6 +96,19 @@ export function installFakeTauri() {
       }
       case "list_versions":
         return [];
+      case "git_info": {
+        const root = repoOf(a.note);
+        return root && { root, branch: "main", changed: uncommitted(root, args.files as string[]) };
+      }
+      case "git_commit": {
+        const root = repoOf(a.note) ?? fail("this note isn't in a git repository");
+        if (!a.message.trim()) fail("the commit needs a message");
+        const paths = uncommitted(root, args.files as string[]);
+        if (!paths.length) fail("nothing has changed since the last commit");
+        for (const p of paths) fs.committed![p] = fs.files[p];
+        save();
+        return "1a2b3c4";
+      }
       case "take_pending_file":
       case "allow_image":
         return null;
