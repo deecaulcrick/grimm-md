@@ -45,7 +45,7 @@ The app opens with a short welcome note and a full feature list on first launch;
 
 ## Brand
 
-The icon, the onboarding drawings and the share pages all come from one set of hand-drawn shapes in [src/illustrations.ts](src/illustrations.ts), in Grimm's palette:
+The icon, the onboarding drawings and the share server's notice pages all come from one set of hand-drawn shapes in [src/illustrations.ts](src/illustrations.ts), in Grimm's palette:
 
 | Orange    | Navy      | Green     | Yellow    | Lavender  | Sky       | Cream     |
 | --------- | --------- | --------- | --------- | --------- | --------- | --------- |
