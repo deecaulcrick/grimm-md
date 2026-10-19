@@ -21,7 +21,10 @@
     "@tauri-apps/plugin-opener": "^2.7.0",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.13.2",
+    "diff": "^8.0.2",
     "lucide": "^1.53.0",
+    "micromark": "^4.0.3",
+    "micromark-extension-gfm": "^3.0.0",
     "pele": "1.6.0"
   },
   "devDependencies": {

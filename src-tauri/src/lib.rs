@@ -1,3 +1,6 @@
+mod history;
+mod watcher;
+
 use std::{
     fs,
     io::{ErrorKind, Write},
@@ -9,6 +12,9 @@ use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
     Emitter, Manager,
 };
+
+use history::{History, Reason, Version, WriteError};
+use watcher::Watcher;
 
 /// A file the OS asked us to open before the frontend was ready to receive it.
 #[derive(Default)]
@@ -73,14 +79,79 @@ async fn fetch_page(url: String) -> Result<Page, String> {
     })
 }
 
+#[derive(serde::Serialize)]
+struct Opened {
+    contents: String,
+    /// What the note's later writes are checked against, so they never
+    /// overwrite a newer file from outside.
+    hash: String,
+}
+
+/// Reads a note to open it, keeping its contents as the first version of this session.
 #[tauri::command]
-fn read_file(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| e.to_string())
+fn open_note(history: tauri::State<History>, path: String) -> Result<Opened, String> {
+    let contents = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let hash = history.opened(&path, &contents);
+    Ok(Opened { contents, hash })
+}
+
+/// What a write is refused with when the file changed since `base`. The new
+/// contents arrive separately, as a "file-changed" event.
+const CHANGED_ON_DISK: &str = "changed-on-disk";
+
+/// Writes a note and returns the hash of what is now on disk. See [`History::write`] for `base`.
+#[tauri::command]
+fn write_file(
+    app: tauri::AppHandle,
+    history: tauri::State<History>,
+    path: String,
+    contents: String,
+    base: Option<String>,
+) -> Result<String, String> {
+    match history.write(&path, &contents, base.as_deref()) {
+        Ok(hash) => Ok(hash),
+        Err(WriteError::Changed(change)) => {
+            let _ = app.emit("file-changed", change);
+            Err(CHANGED_ON_DISK.into())
+        }
+        Err(WriteError::Io(e)) => Err(e),
+    }
 }
 
 #[tauri::command]
-fn write_file(path: String, contents: String) -> Result<(), String> {
-    fs::write(&path, contents).map_err(|e| e.to_string())
+fn snapshot_note(history: tauri::State<History>, path: String, contents: String, reason: Reason) {
+    history.record(&path, &contents, reason);
+}
+
+#[tauri::command]
+fn list_versions(history: tauri::State<History>, path: String) -> Vec<Version> {
+    history.versions(&path)
+}
+
+#[tauri::command]
+fn read_version(history: tauri::State<History>, hash: String) -> Result<String, String> {
+    history.read(&hash)
+}
+
+/// Writes an old version back to the note and returns its hash.
+#[tauri::command]
+fn restore_version(
+    history: tauri::State<History>,
+    path: String,
+    current: String,
+    hash: String,
+) -> Result<String, String> {
+    history.restore(&path, &current, &hash)
+}
+
+#[tauri::command]
+fn copy_history(history: tauri::State<History>, from: String, to: String) {
+    history.copy(&from, &to);
+}
+
+#[tauri::command]
+fn watch_notes(watcher: tauri::State<Watcher>, paths: Vec<String>) {
+    watcher.watch(paths);
 }
 
 #[tauri::command]
@@ -106,15 +177,17 @@ fn collect_markdown(dir: &Path, depth: usize, out: &mut Vec<String>) -> std::io:
                 // Unreadable subfolders are skipped rather than failing the whole listing.
                 let _ = collect_markdown(&path, depth + 1, out);
             }
-        } else if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| MARKDOWN_EXTENSIONS.contains(&e.to_lowercase().as_str()))
-        {
+        } else if is_markdown(&path) {
             out.push(path.to_string_lossy().to_string());
         }
     }
     Ok(())
+}
+
+fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| MARKDOWN_EXTENSIONS.contains(&e.to_lowercase().as_str()))
 }
 
 fn image_extension(path: &Path) -> Option<String> {
@@ -247,6 +320,7 @@ fn build_menu(
         .separator()
         .item(&item("save", "Save", "CmdOrCtrl+S")?)
         .item(&item("save-as", "Save As…", "CmdOrCtrl+Shift+S")?)
+        .item(&item("history", "Version History…", "CmdOrCtrl+Alt+Y")?)
         .separator()
         .text("share", "Share…")
         .separator()
@@ -305,6 +379,13 @@ pub fn run() {
             // Gives the Help menu its search field and standard place in the menu bar.
             #[cfg(target_os = "macos")]
             _help.set_as_help_menu_for_nsapp()?;
+            let data = app.path().app_data_dir()?;
+            let history = History::open(data.join("history"));
+            app.manage(history);
+            app.manage(Watcher::new(app.handle()));
+            // Thinning leaves texts no version needs; clearing them can wait until after startup.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || handle.state::<History>().collect_garbage());
             app.on_menu_event(|app, event| {
                 let _ = app.emit("menu", event.id().as_ref());
             });
@@ -316,8 +397,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            read_file,
+            open_note,
             write_file,
+            snapshot_note,
+            list_versions,
+            read_version,
+            restore_version,
+            copy_history,
+            watch_notes,
             list_markdown_files,
             fetch_page,
             save_image,
