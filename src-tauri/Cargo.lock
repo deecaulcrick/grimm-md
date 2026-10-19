@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "grimm"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "flate2",
  "notify",
