@@ -43,6 +43,8 @@ jobs:
       # breaks, so it is rebuilt as a proper PEM and checked before use.
       - name: Write the App Store Connect API key
         run: |
+          # Bytes, not characters: a mangled secret must reach the check below, not trip sed.
+          export LC_ALL=C
           key=$(printf '%s' "$APPLE_API_KEY_P8" | tr -d '\r')
           if [ -z "$key" ]; then
             echo "::error::The APPLE_API_KEY_P8 secret is empty"; exit 1
